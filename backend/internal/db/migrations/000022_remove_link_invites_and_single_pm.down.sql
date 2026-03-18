@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_project_members_single_pm_per_project;

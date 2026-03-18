@@ -1,0 +1,27 @@
+{
+  "cases": [
+    {
+      "name": "campaign_alpha",
+      "history": [
+        { "date": "2026-03-01", "amount": 1000 },
+        { "date": "2026-03-02", "amount": 300 },
+        { "date": "2026-03-03", "amount": 180 }
+      ],
+      "actual_future": [150, 120, 110],
+      "historical_campaigns": [],
+      "current_ad_spend_to_date": 50,
+      "seed": 42
+    },
+    {
+      "name": "campaign_beta",
+      "history": [
+        { "date": "2026-03-01", "amount": 800 },
+        { "date": "2026-03-02", "amount": 260 }
+      ],
+      "actual_future": [130, 105],
+      "historical_campaigns": [],
+      "current_ad_spend_to_date": 0,
+      "seed": 42
+    }
+  ]
+}

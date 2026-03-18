@@ -1,0 +1,11 @@
+DROP TABLE IF EXISTS forecast_points;
+DROP TABLE IF EXISTS forecast_runs;
+DROP TABLE IF EXISTS payouts;
+DROP TABLE IF EXISTS profit_share_rules;
+DROP TABLE IF EXISTS actual_expenses;
+DROP TABLE IF EXISTS actual_income_daily;
+DROP TABLE IF EXISTS planned_expenses;
+DROP TABLE IF EXISTS project_members;
+DROP TABLE IF EXISTS projects;
+DROP TABLE IF EXISTS users;
+DROP TYPE IF EXISTS project_role;

@@ -1,0 +1,1600 @@
+openapi: 3.0.3
+info:
+  title: IS Budget Backend API
+  version: 1.2.0
+  description: |
+    Backend API для управления проектами, финансами, выплатами и запуском прогнозов.
+
+    Важно:
+    - спецификация отражает текущую фактическую реализацию;
+    - ошибки возвращаются в едином формате `error / code / details`;
+    - часть чувствительных маршрутов защищена мягким in-memory rate limiting.
+servers:
+  - url: http://localhost:8080
+tags:
+  - name: Auth
+    description: Регистрация, вход, профиль пользователя и настройки аккаунта.
+  - name: Projects
+    description: Управление проектами и базовыми атрибутами проекта.
+  - name: Project Members
+    description: Участники проекта, роли доступа и приглашения.
+  - name: Planned Expenses
+    description: Плановые расходы проекта.
+  - name: Income Daily
+    description: Доходы проекта по дням, включая cumulative-input API.
+  - name: Actual Expenses
+    description: Фактические расходы проекта.
+  - name: Tax Rules
+    description: Налоги и комиссии, удерживаемые до распределения прибыли.
+  - name: Profit Share Rules
+    description: Ручные правила распределения прибыли.
+  - name: Payouts
+    description: Предпросмотр, расчёт и экспорт выплат.
+  - name: Dashboard
+    description: Агрегированные показатели проекта.
+  - name: Forecast
+    description: Запуски прогнозирования и результаты.
+  - name: Historical Campaigns
+    description: Исторические кампании пользователя для калибровки прогноза.
+paths:
+  /api/auth/register:
+    post:
+      tags: [Auth]
+      summary: Register user
+      description: |
+        Создаёт пользователя и сразу возвращает access token.
+        Маршрут защищён мягким rate limiting.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Registration success
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login
+      description: |
+        Выполняет вход по email и паролю, возвращает access token.
+        Маршрут защищён мягким rate limiting.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login success
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      summary: Current user
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current authenticated user
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/auth/preferences:
+    put:
+      tags: [Auth]
+      summary: Update user preferences
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePreferencesRequest'
+      responses:
+        '200':
+          description: Preferences updated
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/auth/profile:
+    put:
+      tags: [Auth]
+      summary: Update profile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+      responses:
+        '200':
+          description: Profile updated
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/auth/email:
+    put:
+      tags: [Auth]
+      summary: Update email
+      description: Маршрут защищён мягким rate limiting.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateEmailRequest'
+      responses:
+        '200':
+          description: Email updated, new access token issued
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/auth/password:
+    put:
+      tags: [Auth]
+      summary: Update password
+      description: Маршрут защищён мягким rate limiting.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePasswordRequest'
+      responses:
+        '200':
+          description: Password updated
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/auth/avatar:
+    post:
+      tags: [Auth]
+      summary: Upload avatar
+      description: |
+        Принимает multipart upload. Backend проверяет:
+        - размер файла;
+        - допустимое расширение;
+        - MIME/content соответствие допустимым image-форматам.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [avatar]
+              properties:
+                avatar:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Avatar uploaded
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/auth/avatar/{fileName}:
+    get:
+      tags: [Auth]
+      summary: Download avatar file
+      parameters:
+        - name: fileName
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Avatar file
+          content:
+            image/*:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/projects:
+    get:
+      tags: [Projects]
+      summary: List projects
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Projects list
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Projects]
+      summary: Create project
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectRequest'
+      responses:
+        '201':
+          description: Project created
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/projects/{projectId}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      tags: [Projects]
+      summary: Get project
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Project with current user role
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [Projects]
+      summary: Update project
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectRequest'
+      responses:
+        '200':
+          description: Project updated
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Projects]
+      summary: Delete project
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Project deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/projects/{projectId}/activate:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    post:
+      tags: [Projects]
+      summary: Activate project
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Project activated
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/projects/{projectId}/leave:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    post:
+      tags: [Projects]
+      summary: Leave project
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Left project
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/projects/{projectId}/members:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      tags: [Project Members]
+      summary: List project members
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Members list
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Project Members]
+      summary: Add member by user_id, email or nickname
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddMemberRequest'
+      responses:
+        '201':
+          description: Invite created for target user
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/projects/{projectId}/members/{memberId}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: memberId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      tags: [Project Members]
+      summary: Delete member
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Member removed
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/projects/{projectId}/invites:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      tags: [Project Members]
+      summary: List project invites
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Invite list
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/projects/{projectId}/invites/{inviteId}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: inviteId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      tags: [Project Members]
+      summary: Revoke pending invite
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Invite revoked
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/project-invites/incoming:
+    get:
+      tags: [Project Members]
+      summary: List incoming invites for current user
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Incoming invites
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/project-invites/{token}/accept:
+    post:
+      tags: [Project Members]
+      summary: Accept invite
+      description: Маршрут защищён мягким rate limiting.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Invite accepted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/project-invites/{token}/decline:
+    post:
+      tags: [Project Members]
+      summary: Decline invite
+      description: Маршрут защищён мягким rate limiting.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Invite declined
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/projects/{projectId}/planned-expenses:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      tags: [Planned Expenses]
+      summary: List planned expenses
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Planned expenses
+    post:
+      tags: [Planned Expenses]
+      summary: Create planned expense
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlannedExpenseRequest'
+      responses:
+        '201':
+          description: Planned expense created
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/projects/{projectId}/planned-expenses/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/EntityID'
+    put:
+      tags: [Planned Expenses]
+      summary: Update planned expense
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlannedExpenseRequest'
+      responses:
+        '200':
+          description: Planned expense updated
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Planned Expenses]
+      summary: Delete planned expense
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Planned expense deleted
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/projects/{projectId}/income-daily:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: from
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: to
+        in: query
+        schema:
+          type: string
+          format: date
+    get:
+      tags: [Income Daily]
+      summary: List daily income
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Daily income records
+    post:
+      tags: [Income Daily]
+      summary: Upsert income by date
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IncomeUpsertRequest'
+      responses:
+        '200':
+          description: Income record upserted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/projects/{projectId}/income-daily/cumulative:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    put:
+      tags: [Income Daily]
+      summary: Upsert cumulative income series
+      description: |
+        UI-level cumulative input. Backend пересчитывает series в дневные delta values.
+        Поддерживает очистку точки через `cumulative_amount: null`.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IncomeCumulativeRequest'
+      responses:
+        '200':
+          description: Cumulative series processed and persisted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/projects/{projectId}/income-daily/{date}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: date
+        in: path
+        required: true
+        schema:
+          type: string
+          format: date
+    delete:
+      tags: [Income Daily]
+      summary: Delete income record by date
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Income record deleted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/projects/{projectId}/actual-expenses:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: from
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: to
+        in: query
+        schema:
+          type: string
+          format: date
+    get:
+      tags: [Actual Expenses]
+      summary: List actual expenses
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Actual expenses
+    post:
+      tags: [Actual Expenses]
+      summary: Create actual expense
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActualExpenseRequest'
+      responses:
+        '201':
+          description: Actual expense created
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/projects/{projectId}/actual-expenses/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/EntityID'
+    put:
+      tags: [Actual Expenses]
+      summary: Update actual expense
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActualExpenseRequest'
+      responses:
+        '200':
+          description: Actual expense updated
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Actual Expenses]
+      summary: Delete actual expense
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Actual expense deleted
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/projects/{projectId}/tax-rules:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      tags: [Tax Rules]
+      summary: List tax rules
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Tax rules
+    post:
+      tags: [Tax Rules]
+      summary: Create tax rule
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaxRuleRequest'
+      responses:
+        '201':
+          description: Tax rule created
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/projects/{projectId}/tax-rules/reorder:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    put:
+      tags: [Tax Rules]
+      summary: Reorder tax rules inside DnD UI
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaxRulesReorderRequest'
+      responses:
+        '204':
+          description: Tax rules reordered
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/projects/{projectId}/tax-rules/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/EntityID'
+    put:
+      tags: [Tax Rules]
+      summary: Update tax rule
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaxRuleRequest'
+      responses:
+        '200':
+          description: Tax rule updated
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Tax Rules]
+      summary: Delete tax rule
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Tax rule deleted
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/projects/{projectId}/profit-share-rules:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      tags: [Profit Share Rules]
+      summary: List profit share rules
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Profit share rules
+    post:
+      tags: [Profit Share Rules]
+      summary: Create profit share rule
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfitShareRuleRequest'
+      responses:
+        '201':
+          description: Profit share rule created
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/projects/{projectId}/profit-share-rules/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/EntityID'
+    put:
+      tags: [Profit Share Rules]
+      summary: Update profit share rule
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfitShareRuleRequest'
+      responses:
+        '200':
+          description: Profit share rule updated
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Profit Share Rules]
+      summary: Delete profit share rule
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Profit share rule deleted
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/projects/{projectId}/payout-preview:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      tags: [Payouts]
+      summary: Get payout preview
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Preview of payout distribution and tax breakdown
+  /api/projects/{projectId}/my-income:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      tags: [Payouts]
+      summary: Get my income summary
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current user income breakdown
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/projects/{projectId}/payouts/calculate:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    post:
+      tags: [Payouts]
+      summary: Calculate payouts and store PDF snapshot
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: Payouts calculated and snapshot created
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/projects/{projectId}/payout-snapshots/{fileName}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: fileName
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Payouts]
+      summary: Download payout snapshot PDF
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Payout snapshot PDF
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/projects/{projectId}/dashboard:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: days
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 365
+    get:
+      tags: [Dashboard]
+      summary: Get dashboard aggregates
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Dashboard data
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/projects/{projectId}/forecast:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    post:
+      tags: [Forecast]
+      summary: Create forecast run
+      description: |
+        Backend orchestration role:
+        - собирает фактическую историю доходов проекта;
+        - добавляет агрегированный ad spend;
+        - подмешивает historical campaigns той же категории;
+        - вызывает analytics service;
+        - нормализует и сохраняет результат.
+
+        Семантика сценариев:
+        - `p10` — pessimistic scenario,
+        - `yhat` — expected scenario,
+        - `p90` — optimistic scenario.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForecastRunRequest'
+      responses:
+        '201':
+          description: Forecast run created
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '502':
+          description: Analytics integration error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                serviceUnavailable:
+                  value:
+                    error: forecast service unavailable
+                    code: forecast_service_unavailable
+                invalidResponse:
+                  value:
+                    error: forecast service returned invalid response
+                    code: forecast_service_invalid_response
+        '504':
+          description: Forecast service timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                timeout:
+                  value:
+                    error: forecast service timeout
+                    code: forecast_service_timeout
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/projects/{projectId}/forecast/runs:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      tags: [Forecast]
+      summary: List forecast runs
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Forecast run list
+  /api/projects/{projectId}/forecast/latest:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      tags: [Forecast]
+      summary: Get latest forecast run
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Latest forecast run
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/projects/{projectId}/forecast/{runId}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/RunID'
+    get:
+      tags: [Forecast]
+      summary: Get forecast run by id
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Forecast run
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Forecast]
+      summary: Delete forecast run
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Forecast run deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/projects/{projectId}/forecast/{runId}/report.pdf:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/RunID'
+    get:
+      tags: [Forecast]
+      summary: Download forecast report PDF
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Forecast report PDF
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/historical-campaigns:
+    get:
+      tags: [Historical Campaigns]
+      summary: List historical campaigns for current user
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 80
+      responses:
+        '200':
+          description: Historical campaigns list
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Historical Campaigns]
+      summary: Create historical campaign
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HistoricalCampaignUpsertRequest'
+      responses:
+        '201':
+          description: Historical campaign created
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/historical-campaigns/{campaignId}:
+    parameters:
+      - $ref: '#/components/parameters/CampaignID'
+    put:
+      tags: [Historical Campaigns]
+      summary: Update historical campaign
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HistoricalCampaignUpsertRequest'
+      responses:
+        '200':
+          description: Historical campaign updated
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Historical Campaigns]
+      summary: Delete historical campaign
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Historical campaign deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    ProjectID:
+      name: projectId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    EntityID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RunID:
+      name: runId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    CampaignID:
+      name: campaignId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    RateLimited:
+      description: Too many requests
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds until next retry window
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            rateLimited:
+              value:
+                error: too many requests, please try again later
+                code: rate_limited
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+        code:
+          type: string
+          description: Stable machine-readable error code
+        details:
+          type: object
+          additionalProperties:
+            type: string
+          description: Field-level validation details
+    RegisterRequest:
+      type: object
+      required: [email, password, first_name, last_name, nickname]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 6
+        first_name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        last_name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        nickname:
+          type: string
+          minLength: 3
+          maxLength: 32
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 6
+    UpdatePreferencesRequest:
+      type: object
+      required: [default_currency_code]
+      properties:
+        default_currency_code:
+          type: string
+          enum: [EUR, USD, RUB]
+    UpdateProfileRequest:
+      type: object
+      required: [first_name, last_name, nickname, default_currency_code]
+      properties:
+        first_name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        last_name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        nickname:
+          type: string
+          minLength: 3
+          maxLength: 32
+        default_currency_code:
+          type: string
+          enum: [EUR, USD, RUB]
+    UpdateEmailRequest:
+      type: object
+      required: [new_email, current_password]
+      properties:
+        new_email:
+          type: string
+          format: email
+        current_password:
+          type: string
+          minLength: 6
+    UpdatePasswordRequest:
+      type: object
+      required: [current_password, new_password]
+      properties:
+        current_password:
+          type: string
+          minLength: 6
+        new_password:
+          type: string
+          minLength: 6
+    ProjectRequest:
+      type: object
+      required: [name, duration_days]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 500
+        duration_days:
+          type: integer
+          minimum: 3
+          maximum: 30
+        currency_code:
+          type: string
+          enum: [EUR, USD, RUB]
+        secondary_currency_code:
+          type: string
+          enum: [EUR, USD, RUB]
+        category:
+          type: string
+          minLength: 2
+          maxLength: 80
+    AddMemberRequest:
+      type: object
+      required: [role]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        nickname:
+          type: string
+          minLength: 3
+          maxLength: 32
+        role:
+          type: string
+          description: One of current backend role labels, for example TEAM / ANALYST / CUSTOMER.
+    PlannedExpenseRequest:
+      type: object
+      required: [category, amount, due_date]
+      properties:
+        category:
+          type: string
+          minLength: 2
+          maxLength: 60
+        amount:
+          type: number
+          minimum: 0
+        due_date:
+          type: string
+          format: date
+        is_mandatory:
+          type: boolean
+        priority:
+          type: integer
+          minimum: 0
+          maximum: 1000
+        note:
+          type: string
+          maxLength: 500
+    IncomeUpsertRequest:
+      type: object
+      required: [date, amount]
+      properties:
+        date:
+          type: string
+          format: date
+        amount:
+          type: number
+          description: |
+            Stored as daily delta. Negative values are allowed for returns/refunds.
+    IncomeCumulativeRequest:
+      type: object
+      required: [points]
+      properties:
+        points:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [date]
+            properties:
+              date:
+                type: string
+                format: date
+              cumulative_amount:
+                type: number
+                nullable: true
+                minimum: 0
+    ActualExpenseRequest:
+      type: object
+      required: [title, category, amount, paid_at]
+      properties:
+        planned_expense_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          minLength: 2
+          maxLength: 120
+        category:
+          type: string
+          minLength: 2
+          maxLength: 60
+        amount:
+          type: number
+          minimum: 0
+        paid_at:
+          type: string
+          format: date
+        note:
+          type: string
+          maxLength: 500
+    TaxRuleRequest:
+      type: object
+      required: [name, percent, level]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 120
+        percent:
+          type: number
+          minimum: 0
+          maximum: 100
+        level:
+          type: integer
+          minimum: 1
+    TaxRulesReorderRequest:
+      type: object
+      required: [ordered_ids]
+      properties:
+        ordered_ids:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            format: uuid
+    ProfitShareRuleRequest:
+      type: object
+      required: [recipient_name, responsibility, percent, level]
+      properties:
+        recipient_user_id:
+          type: string
+          format: uuid
+        recipient_name:
+          type: string
+          minLength: 2
+          maxLength: 120
+        responsibility:
+          type: string
+          minLength: 2
+          maxLength: 160
+        currency_code:
+          type: string
+          enum: [EUR, USD, RUB]
+        percent:
+          type: number
+          minimum: 0
+          maximum: 100
+        level:
+          type: integer
+          minimum: 1
+          maximum: 20
+        applies_after_mandatory:
+          type: boolean
+    ForecastRunRequest:
+      type: object
+      required: [horizon_days]
+      properties:
+        horizon_days:
+          type: integer
+          minimum: 1
+          maximum: 30
+    HistoricalCampaignUpsertRequest:
+      type: object
+      required: [name, category, duration_days, currency_code, days]
+      properties:
+        name:
+          type: string
+        category:
+          type: string
+        duration_days:
+          type: integer
+        currency_code:
+          type: string
+          enum: [EUR, USD, RUB]
+        started_at:
+          type: string
+          format: date
+        ended_at:
+          type: string
+          format: date
+        days:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistoricalCampaignDayRequest'
+    HistoricalCampaignDayRequest:
+      type: object
+      required: [day_number, income_amount]
+      properties:
+        day_number:
+          type: integer
+        income_amount:
+          type: number
+        expenses:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistoricalCampaignExpenseRequest'
+    HistoricalCampaignExpenseRequest:
+      type: object
+      required: [category, amount]
+      properties:
+        category:
+          type: string
+        amount:
+          type: number

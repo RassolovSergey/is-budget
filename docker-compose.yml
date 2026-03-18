@@ -1,0 +1,65 @@
+services:
+  postgres:
+    image: postgres:16-alpine3.21
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: is_budget
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d is_budget"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  analytics:
+    build:
+      context: ./analytics
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/docs')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      PORT: "8080"
+      DATABASE_URL: postgres://app:app@postgres:5432/is_budget?sslmode=disable
+      JWT_SECRET: dev-secret-change-me
+      ANALYTICS_URL: http://analytics:8000
+      MIGRATIONS_PATH: /app/migrations
+      FRONTEND_ORIGIN: http://localhost:3000
+      PAYOUT_SNAPSHOTS_DIR: /app/storage/payout_snapshots
+      AVATARS_DIR: /app/storage/avatars
+    depends_on:
+      postgres:
+        condition: service_healthy
+      analytics:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./backend/storage:/app/storage
+
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8080/api
+    depends_on:
+      backend:
+        condition: service_started
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres_data:
+
+

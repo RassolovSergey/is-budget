@@ -19,8 +19,11 @@ type Repository interface {
 	GetFinanceSummaryByProject(ctx context.Context, projectID uuid.UUID) (sqlc.FinanceSummary, error)
 	ListProfitShareRulesByProject(ctx context.Context, projectID uuid.UUID) ([]sqlc.ProfitShareRule, error)
 	ListTaxRulesByProject(ctx context.Context, projectID uuid.UUID) ([]sqlc.ProjectTaxRule, error)
+	GetLatestForecastRunByProject(ctx context.Context, projectID uuid.UUID) (sqlc.ForecastRun, error)
+	ListForecastPointsByRun(ctx context.Context, runID uuid.UUID) ([]sqlc.ForecastPoint, error)
 	StorePayouts(ctx context.Context, projectID uuid.UUID, calculatedAt time.Time, items []PreviewItem) ([]sqlc.Payout, error)
 	CreateProfitShareRule(ctx context.Context, req sqlc.CreateProfitShareRuleParams) (sqlc.ProfitShareRule, error)
+	CreateProfitShareRulePrepend(ctx context.Context, req sqlc.CreateProfitShareRuleParams) (sqlc.ProfitShareRule, error)
 	UpdateProfitShareRule(ctx context.Context, req sqlc.UpdateProfitShareRuleParams) (sqlc.ProfitShareRule, error)
 	DeleteProfitShareRule(ctx context.Context, req sqlc.DeleteProfitShareRuleParams) error
 }
@@ -141,6 +144,29 @@ func (r *PGRepository) ListTaxRulesByProject(ctx context.Context, projectID uuid
 	return items, nil
 }
 
+func (r *PGRepository) GetLatestForecastRunByProject(ctx context.Context, projectID uuid.UUID) (sqlc.ForecastRun, error) {
+	return r.q.GetLatestForecastRunByProject(ctx, projectID)
+}
+
+func (r *PGRepository) ListForecastPointsByRun(ctx context.Context, runID uuid.UUID) ([]sqlc.ForecastPoint, error) {
+	rows, err := r.q.ListForecastPointsByRun(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]sqlc.ForecastPoint, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, sqlc.ForecastPoint{
+			ID:           row.ID,
+			RunID:        row.RunID,
+			ForecastDate: row.ForecastDate,
+			Yhat:         row.Yhat,
+			P10:          row.P10,
+			P90:          row.P90,
+		})
+	}
+	return items, nil
+}
+
 func (r *PGRepository) StorePayouts(ctx context.Context, projectID uuid.UUID, calculatedAt time.Time, items []PreviewItem) ([]sqlc.Payout, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -193,6 +219,92 @@ func (r *PGRepository) StorePayouts(ctx context.Context, projectID uuid.UUID, ca
 func (r *PGRepository) CreateProfitShareRule(ctx context.Context, req sqlc.CreateProfitShareRuleParams) (sqlc.ProfitShareRule, error) {
 	row, err := r.q.CreateProfitShareRule(ctx, req)
 	if err != nil {
+		return sqlc.ProfitShareRule{}, err
+	}
+	return sqlc.ProfitShareRule{
+		ID:                    row.ID,
+		ProjectID:             row.ProjectID,
+		RecipientName:         row.RecipientName,
+		Percent:               row.Percent,
+		AppliesAfterMandatory: row.AppliesAfterMandatory,
+		CreatedAt:             row.CreatedAt,
+		UpdatedAt:             row.UpdatedAt,
+		Responsibility:        row.Responsibility,
+		Level:                 row.Level,
+		CurrencyCode:          row.CurrencyCode,
+		RecipientUserID:       row.RecipientUserID,
+	}, nil
+}
+
+func (r *PGRepository) CreateProfitShareRulePrepend(ctx context.Context, req sqlc.CreateProfitShareRuleParams) (sqlc.ProfitShareRule, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return sqlc.ProfitShareRule{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := r.q.WithTx(tx)
+	rows, err := qtx.ListProfitShareRulesByProject(ctx, req.ProjectID)
+	if err != nil {
+		return sqlc.ProfitShareRule{}, err
+	}
+	rules := make([]sqlc.ProfitShareRule, 0, len(rows))
+	for _, row := range rows {
+		rules = append(rules, sqlc.ProfitShareRule{
+			ID:                    row.ID,
+			ProjectID:             row.ProjectID,
+			RecipientName:         row.RecipientName,
+			Percent:               row.Percent,
+			AppliesAfterMandatory: row.AppliesAfterMandatory,
+			CreatedAt:             row.CreatedAt,
+			UpdatedAt:             row.UpdatedAt,
+			Responsibility:        row.Responsibility,
+			Level:                 row.Level,
+			CurrencyCode:          row.CurrencyCode,
+			RecipientUserID:       row.RecipientUserID,
+		})
+	}
+
+	shifted := shiftProfitShareRulesForPrepend(rules)
+	tempBase := int32(len(shifted) + 1000)
+	for idx, rule := range shifted {
+		if _, err := qtx.UpdateProfitShareRule(ctx, sqlc.UpdateProfitShareRuleParams{
+			ProjectID:             req.ProjectID,
+			ID:                    rule.ID,
+			RecipientUserID:       rule.RecipientUserID,
+			RecipientName:         rule.RecipientName,
+			Responsibility:        rule.Responsibility,
+			CurrencyCode:          rule.CurrencyCode,
+			Percent:               rule.Percent,
+			Level:                 tempBase + int32(idx),
+			AppliesAfterMandatory: true,
+		}); err != nil {
+			return sqlc.ProfitShareRule{}, err
+		}
+	}
+	for _, rule := range shifted {
+		if _, err := qtx.UpdateProfitShareRule(ctx, sqlc.UpdateProfitShareRuleParams{
+			ProjectID:             req.ProjectID,
+			ID:                    rule.ID,
+			RecipientUserID:       rule.RecipientUserID,
+			RecipientName:         rule.RecipientName,
+			Responsibility:        rule.Responsibility,
+			CurrencyCode:          rule.CurrencyCode,
+			Percent:               rule.Percent,
+			Level:                 rule.Level,
+			AppliesAfterMandatory: rule.Level > 1,
+		}); err != nil {
+			return sqlc.ProfitShareRule{}, err
+		}
+	}
+
+	req.Level = 1
+	req.AppliesAfterMandatory = false
+	row, err := qtx.CreateProfitShareRule(ctx, req)
+	if err != nil {
+		return sqlc.ProfitShareRule{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return sqlc.ProfitShareRule{}, err
 	}
 	return sqlc.ProfitShareRule{

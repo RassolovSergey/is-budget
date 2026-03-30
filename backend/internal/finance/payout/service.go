@@ -114,22 +114,46 @@ type MyIncomeItem struct {
 	ConversionRateToUser float64   `json:"conversion_rate_to_user"`
 }
 
+type MyIncomeForecastScenario struct {
+	ProjectedIncomeTotal float64 `json:"projected_income_total"`
+	ProjectAmount        float64 `json:"project_amount"`
+	UserAmount           float64 `json:"user_amount"`
+}
+
+type MyIncomeForecastProjection struct {
+	RunID     uuid.UUID                `json:"run_id"`
+	CreatedAt time.Time                `json:"created_at"`
+	P10       MyIncomeForecastScenario `json:"p10"`
+	Yhat      MyIncomeForecastScenario `json:"yhat"`
+	P90       MyIncomeForecastScenario `json:"p90"`
+}
+
 type MyIncomeResponse struct {
-	ProjectID           uuid.UUID      `json:"project_id"`
-	ProjectCurrencyCode string         `json:"project_currency_code"`
-	UserCurrencyCode    string         `json:"user_currency_code"`
-	IncomeTotal         float64        `json:"income_total"`
-	ExpensesTotal       float64        `json:"expenses_total"`
-	NetProfitToDate     float64        `json:"net_profit_to_date"`
-	TaxTotal            float64        `json:"tax_total"`
-	AvailableForSharing float64        `json:"available_for_sharing"`
-	DistributedAmount   float64        `json:"distributed_amount"`
-	DistributedToOthers float64        `json:"distributed_to_others"`
-	TotalProjectAmount  float64        `json:"total_project_amount"`
-	TotalUserAmount     float64        `json:"total_user_amount"`
-	TotalConversionRate float64        `json:"total_conversion_rate"`
-	MatchingStrategy    string         `json:"matching_strategy"`
-	Items               []MyIncomeItem `json:"items"`
+	ProjectID           uuid.UUID                   `json:"project_id"`
+	ProjectCurrencyCode string                      `json:"project_currency_code"`
+	UserCurrencyCode    string                      `json:"user_currency_code"`
+	IncomeTotal         float64                     `json:"income_total"`
+	ExpensesTotal       float64                     `json:"expenses_total"`
+	NetProfitToDate     float64                     `json:"net_profit_to_date"`
+	TaxTotal            float64                     `json:"tax_total"`
+	AvailableForSharing float64                     `json:"available_for_sharing"`
+	DistributedAmount   float64                     `json:"distributed_amount"`
+	DistributedToOthers float64                     `json:"distributed_to_others"`
+	TotalProjectAmount  float64                     `json:"total_project_amount"`
+	TotalUserAmount     float64                     `json:"total_user_amount"`
+	TotalConversionRate float64                     `json:"total_conversion_rate"`
+	MatchingStrategy    string                      `json:"matching_strategy"`
+	ForecastProjection  *MyIncomeForecastProjection `json:"forecast_projection,omitempty"`
+	Items               []MyIncomeItem              `json:"items"`
+}
+
+type myIncomeComputation struct {
+	Items               []MyIncomeItem
+	UserCurrencyCode    string
+	TotalProjectAmount  float64
+	TotalUserAmount     float64
+	TotalConversionRate float64
+	DistributedToOthers float64
 }
 
 func (s *Service) ListRules(ctx context.Context, projectID uuid.UUID) ([]sqlc.ProfitShareRule, error) {
@@ -167,6 +191,40 @@ func (s *Service) CreateRule(ctx context.Context, req sqlc.CreateProfitShareRule
 		return sqlc.ProfitShareRule{}, err
 	}
 	created, err := s.repo.CreateProfitShareRule(ctx, req)
+	if err != nil {
+		return sqlc.ProfitShareRule{}, err
+	}
+	rules, err := s.normalizeRuleLevels(ctx, req.ProjectID)
+	if err != nil {
+		return sqlc.ProfitShareRule{}, err
+	}
+	for _, rule := range rules {
+		if rule.ID == created.ID {
+			return rule, nil
+		}
+	}
+	return created, nil
+}
+
+func (s *Service) CreateRulePrepend(ctx context.Context, req sqlc.CreateProfitShareRuleParams) (sqlc.ProfitShareRule, error) {
+	if _, err := s.normalizeRuleLevels(ctx, req.ProjectID); err != nil {
+		return sqlc.ProfitShareRule{}, err
+	}
+	project, err := s.repo.GetProjectByID(ctx, req.ProjectID)
+	if err != nil {
+		return sqlc.ProfitShareRule{}, err
+	}
+	req.Level = 1
+	req.AppliesAfterMandatory = false
+	normalizedCurrency, err := normalizePayoutCurrencyCode(req.CurrencyCode, project.CurrencyCode)
+	if err != nil {
+		return sqlc.ProfitShareRule{}, err
+	}
+	req.CurrencyCode = normalizedCurrency
+	if err := s.validateRecipientUser(ctx, req.ProjectID, req.RecipientUserID); err != nil {
+		return sqlc.ProfitShareRule{}, err
+	}
+	created, err := s.repo.CreateProfitShareRulePrepend(ctx, req)
 	if err != nil {
 		return sqlc.ProfitShareRule{}, err
 	}
@@ -249,24 +307,42 @@ func (s *Service) Summary(ctx context.Context, projectID uuid.UUID) (FinancialSu
 }
 
 func (s *Service) Preview(ctx context.Context, projectID uuid.UUID) (PreviewResponse, error) {
-	project, err := s.repo.GetProjectByID(ctx, projectID)
+	project, totals, taxRules, rules, err := s.loadPreviewInputs(ctx, projectID)
 	if err != nil {
 		return PreviewResponse{}, err
 	}
+	return s.buildPreviewResponse(ctx, project, totals, taxRules, rules)
+}
 
-	summary, err := s.Summary(ctx, projectID)
+func (s *Service) loadPreviewInputs(ctx context.Context, projectID uuid.UUID) (sqlc.Project, sqlc.FinanceSummary, []sqlc.ProjectTaxRule, []sqlc.ProfitShareRule, error) {
+	project, err := s.repo.GetProjectByID(ctx, projectID)
 	if err != nil {
-		return PreviewResponse{}, err
+		return sqlc.Project{}, sqlc.FinanceSummary{}, nil, nil, err
+	}
+	totals, err := s.repo.GetFinanceSummaryByProject(ctx, projectID)
+	if err != nil {
+		return sqlc.Project{}, sqlc.FinanceSummary{}, nil, nil, err
 	}
 	taxRules, err := s.repo.ListTaxRulesByProject(ctx, projectID)
 	if err != nil {
-		return PreviewResponse{}, err
+		return sqlc.Project{}, sqlc.FinanceSummary{}, nil, nil, err
 	}
-	taxLevels := buildTaxLevelItems(summary.AvailableBeforeTax, taxRules)
 	rules, err := s.repo.ListProfitShareRulesByProject(ctx, projectID)
 	if err != nil {
-		return PreviewResponse{}, err
+		return sqlc.Project{}, sqlc.FinanceSummary{}, nil, nil, err
 	}
+	return project, totals, taxRules, rules, nil
+}
+
+func (s *Service) buildPreviewResponse(
+	ctx context.Context,
+	project sqlc.Project,
+	totals sqlc.FinanceSummary,
+	taxRules []sqlc.ProjectTaxRule,
+	rules []sqlc.ProfitShareRule,
+) (PreviewResponse, error) {
+	summary := ComputeSummary(totals, taxRules)
+	taxLevels := buildTaxLevelItems(summary.AvailableBeforeTax, taxRules)
 	rules = normalizedRulesInMemory(rules)
 	items := BuildPreviewItems(summary.AvailableForSharing, rules, project.CurrencyCode)
 	distributedAmount, distributedPercent, remainingAmount, remainingPercent := calculateDistributionStats(summary.AvailableForSharing, items)
@@ -463,14 +539,50 @@ func (s *Service) MyIncome(ctx context.Context, projectID, userID uuid.UUID) (My
 		return MyIncomeResponse{}, err
 	}
 
-	preview, err := s.Preview(ctx, projectID)
+	project, totals, taxRules, rules, err := s.loadPreviewInputs(ctx, projectID)
 	if err != nil {
 		return MyIncomeResponse{}, err
 	}
 
-	userCurrency, err := normalizePayoutCurrencyCode(user.DefaultCurrencyCode, "EUR")
+	preview, err := s.buildPreviewResponse(ctx, project, totals, taxRules, rules)
 	if err != nil {
-		userCurrency = "EUR"
+		return MyIncomeResponse{}, err
+	}
+
+	computation, err := s.computeMyIncomeFromPreview(ctx, user, preview)
+	if err != nil {
+		return MyIncomeResponse{}, err
+	}
+
+	forecastProjection, err := s.buildForecastProjection(ctx, project, user, totals, taxRules, rules)
+	if err != nil {
+		return MyIncomeResponse{}, err
+	}
+
+	return MyIncomeResponse{
+		ProjectID:           projectID,
+		ProjectCurrencyCode: preview.ProjectCurrencyCode,
+		UserCurrencyCode:    computation.UserCurrencyCode,
+		IncomeTotal:         preview.Summary.IncomeTotal,
+		ExpensesTotal:       preview.Summary.ExpensesTotal,
+		NetProfitToDate:     preview.Summary.NetProfitToDate,
+		TaxTotal:            preview.Summary.TaxTotal,
+		AvailableForSharing: preview.Summary.AvailableForSharing,
+		DistributedAmount:   preview.DistributedAmount,
+		DistributedToOthers: computation.DistributedToOthers,
+		TotalProjectAmount:  computation.TotalProjectAmount,
+		TotalUserAmount:     computation.TotalUserAmount,
+		TotalConversionRate: computation.TotalConversionRate,
+		MatchingStrategy:    "strict recipient_user_id == current user id",
+		ForecastProjection:  forecastProjection,
+		Items:               computation.Items,
+	}, nil
+}
+
+func (s *Service) computeMyIncomeFromPreview(ctx context.Context, user sqlc.User, preview PreviewResponse) (myIncomeComputation, error) {
+	userCurrency, err := normalizePayoutCurrencyCode(user.DefaultCurrencyCode, preview.ProjectCurrencyCode)
+	if err != nil {
+		userCurrency = preview.ProjectCurrencyCode
 	}
 
 	items := make([]MyIncomeItem, 0, len(preview.Items))
@@ -478,16 +590,13 @@ func (s *Service) MyIncome(ctx context.Context, projectID, userID uuid.UUID) (My
 	totalUserAmount := 0.0
 
 	for _, item := range preview.Items {
-		if item.RecipientUserID == nil {
-			continue
-		}
-		if *item.RecipientUserID != user.ID {
+		if item.RecipientUserID == nil || *item.RecipientUserID != user.ID {
 			continue
 		}
 
 		userAmount, rate, err := s.convertAmount(ctx, item.PayoutAmount, preview.ProjectCurrencyCode, userCurrency)
 		if err != nil {
-			return MyIncomeResponse{}, err
+			return myIncomeComputation{}, err
 		}
 
 		items = append(items, MyIncomeItem{
@@ -511,23 +620,103 @@ func (s *Service) MyIncome(ctx context.Context, projectID, userID uuid.UUID) (My
 		totalRate = round6(totalUserAmount / totalProjectAmount)
 	}
 
-	return MyIncomeResponse{
-		ProjectID:           projectID,
-		ProjectCurrencyCode: preview.ProjectCurrencyCode,
+	return myIncomeComputation{
+		Items:               items,
 		UserCurrencyCode:    userCurrency,
-		IncomeTotal:         preview.Summary.IncomeTotal,
-		ExpensesTotal:       preview.Summary.ExpensesTotal,
-		NetProfitToDate:     preview.Summary.NetProfitToDate,
-		TaxTotal:            preview.Summary.TaxTotal,
-		AvailableForSharing: preview.Summary.AvailableForSharing,
-		DistributedAmount:   preview.DistributedAmount,
-		DistributedToOthers: round2(math.Max(preview.DistributedAmount-totalProjectAmount, 0)),
 		TotalProjectAmount:  totalProjectAmount,
 		TotalUserAmount:     totalUserAmount,
 		TotalConversionRate: totalRate,
-		MatchingStrategy:    "strict recipient_user_id == current user id",
-		Items:               items,
+		DistributedToOthers: round2(math.Max(preview.DistributedAmount-totalProjectAmount, 0)),
 	}, nil
+}
+
+func (s *Service) buildForecastProjection(
+	ctx context.Context,
+	project sqlc.Project,
+	user sqlc.User,
+	totals sqlc.FinanceSummary,
+	taxRules []sqlc.ProjectTaxRule,
+	rules []sqlc.ProfitShareRule,
+) (*MyIncomeForecastProjection, error) {
+	run, err := s.repo.GetLatestForecastRunByProject(ctx, project.ID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	points, err := s.repo.ListForecastPointsByRun(ctx, run.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	currentIncome := round2(totals.IncomeTotal)
+	sums := sumForecastScenarios(points)
+
+	p10, err := s.buildForecastScenario(ctx, project, user, totals, taxRules, rules, currentIncome+sums.P10)
+	if err != nil {
+		return nil, err
+	}
+	yhat, err := s.buildForecastScenario(ctx, project, user, totals, taxRules, rules, currentIncome+sums.Yhat)
+	if err != nil {
+		return nil, err
+	}
+	p90, err := s.buildForecastScenario(ctx, project, user, totals, taxRules, rules, currentIncome+sums.P90)
+	if err != nil {
+		return nil, err
+	}
+
+	return &MyIncomeForecastProjection{
+		RunID:     run.ID,
+		CreatedAt: run.CreatedAt,
+		P10:       p10,
+		Yhat:      yhat,
+		P90:       p90,
+	}, nil
+}
+
+func (s *Service) buildForecastScenario(
+	ctx context.Context,
+	project sqlc.Project,
+	user sqlc.User,
+	totals sqlc.FinanceSummary,
+	taxRules []sqlc.ProjectTaxRule,
+	rules []sqlc.ProfitShareRule,
+	projectedIncomeTotal float64,
+) (MyIncomeForecastScenario, error) {
+	projectedTotals := totals
+	projectedTotals.IncomeTotal = round2(projectedIncomeTotal)
+
+	preview, err := s.buildPreviewResponse(ctx, project, projectedTotals, taxRules, rules)
+	if err != nil {
+		return MyIncomeForecastScenario{}, err
+	}
+	computation, err := s.computeMyIncomeFromPreview(ctx, user, preview)
+	if err != nil {
+		return MyIncomeForecastScenario{}, err
+	}
+
+	return MyIncomeForecastScenario{
+		ProjectedIncomeTotal: preview.Summary.IncomeTotal,
+		ProjectAmount:        computation.TotalProjectAmount,
+		UserAmount:           computation.TotalUserAmount,
+	}, nil
+}
+
+type forecastScenarioSums struct {
+	P10  float64
+	Yhat float64
+	P90  float64
+}
+
+func sumForecastScenarios(points []sqlc.ForecastPoint) forecastScenarioSums {
+	out := forecastScenarioSums{}
+	for _, point := range points {
+		out.P10 = round2(out.P10 + point.P10)
+		out.Yhat = round2(out.Yhat + point.Yhat)
+		out.P90 = round2(out.P90 + point.P90)
+	}
+	return out
 }
 
 func (s *Service) CalculateAndPersist(ctx context.Context, projectID uuid.UUID) ([]sqlc.Payout, PreviewResponse, SnapshotFile, error) {
@@ -720,6 +909,17 @@ func normalizeRuleLevel(level int32, appliesAfterMandatory bool) int32 {
 		return 2
 	}
 	return 1
+}
+
+func shiftProfitShareRulesForPrepend(rules []sqlc.ProfitShareRule) []sqlc.ProfitShareRule {
+	shifted := make([]sqlc.ProfitShareRule, 0, len(rules))
+	for _, rule := range rules {
+		next := rule
+		next.Level = rule.Level + 1
+		next.AppliesAfterMandatory = true
+		shifted = append(shifted, next)
+	}
+	return shifted
 }
 
 func profitRuleLevel(rule sqlc.ProfitShareRule) int32 {

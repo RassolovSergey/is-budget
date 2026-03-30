@@ -11,6 +11,17 @@ import (
 	"github.com/google/uuid"
 )
 
+func setForecastTodayForTest(t *testing.T, today time.Time) {
+	t.Helper()
+	prev := forecastTodayUTC
+	forecastTodayUTC = func() time.Time {
+		return normalizeUTCDate(today)
+	}
+	t.Cleanup(func() {
+		forecastTodayUTC = prev
+	})
+}
+
 type fakeAnalyticsClient struct {
 	response AnalyticsResponse
 	err      error
@@ -125,6 +136,8 @@ func (f *fakeRepo) DeleteForecastRun(ctx context.Context, projectID, runID uuid.
 }
 
 func TestRunStoresAndLoadsForecastRun(t *testing.T) {
+	setForecastTodayForTest(t, time.Date(2026, 2, 3, 0, 0, 0, 0, time.UTC))
+
 	projectID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
 	repo := &fakeRepo{
 		history: []sqlc.ActualIncomeDaily{
@@ -175,6 +188,8 @@ func TestRunStoresAndLoadsForecastRun(t *testing.T) {
 }
 
 func TestRunReturnsNoRemainingForecastWhenCampaignFilled(t *testing.T) {
+	setForecastTodayForTest(t, time.Date(2026, 2, 10, 0, 0, 0, 0, time.UTC))
+
 	projectID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
 	repo := &fakeRepo{
 		history: []sqlc.ActualIncomeDaily{
@@ -200,6 +215,8 @@ func TestRunReturnsNoRemainingForecastWhenCampaignFilled(t *testing.T) {
 }
 
 func TestRunIgnoresIncomeOutsideCampaignWindow(t *testing.T) {
+	setForecastTodayForTest(t, time.Date(2026, 2, 3, 0, 0, 0, 0, time.UTC))
+
 	projectID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
 	repo := &fakeRepo{
 		history: []sqlc.ActualIncomeDaily{
@@ -227,14 +244,131 @@ func TestRunIgnoresIncomeOutsideCampaignWindow(t *testing.T) {
 		t.Fatalf("expected filtered current_income_to_date=390, got %v", client.lastReq.CurrentIncomeToDate)
 	}
 	if len(client.lastReq.History) != 3 {
-		t.Fatalf("expected 3 in-window history rows, got %d", len(client.lastReq.History))
+		t.Fatalf("expected 3 observed calendar days, got %d", len(client.lastReq.History))
 	}
 	if client.lastReq.HorizonDays != 7 {
 		t.Fatalf("expected horizon reduced to 7 remaining days, got %d", client.lastReq.HorizonDays)
 	}
 }
 
+func TestRunBuildsDenseObservedHistoryAcrossCalendarGaps(t *testing.T) {
+	setForecastTodayForTest(t, time.Date(2026, 2, 5, 0, 0, 0, 0, time.UTC))
+
+	projectID := uuid.MustParse("88888888-8888-8888-8888-888888888888")
+	repo := &fakeRepo{
+		history: []sqlc.ActualIncomeDaily{
+			{IncomeDate: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), Amount: 100},
+			{IncomeDate: time.Date(2026, 2, 3, 0, 0, 0, 0, time.UTC), Amount: 40},
+		},
+	}
+	client := &fakeAnalyticsClient{response: AnalyticsResponse{
+		ModelVersion: "v1",
+		HorizonDays:  5,
+		Forecast: []AnalyticsPoint{
+			{Date: "2026-02-06", Yhat: 50, P10: 40, P90: 60},
+		},
+	}}
+	svc := NewService(repo, client)
+
+	_, err := svc.Run(context.Background(), projectID, 7)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	if client.lastReq.HorizonDays != 7 {
+		t.Fatalf("expected horizon reduced to 7 remaining days after latest actual entry, got %d", client.lastReq.HorizonDays)
+	}
+	if len(client.lastReq.History) != 3 {
+		t.Fatalf("expected dense 3-day observed history, got %d points", len(client.lastReq.History))
+	}
+
+	want := []HistoryPoint{
+		{Date: "2026-02-01", Amount: 100},
+		{Date: "2026-02-02", Amount: 0},
+		{Date: "2026-02-03", Amount: 40},
+	}
+	for i, point := range want {
+		if client.lastReq.History[i] != point {
+			t.Fatalf("history[%d] = %+v, want %+v", i, client.lastReq.History[i], point)
+		}
+	}
+	if client.lastReq.CurrentIncomeToDate != 140 {
+		t.Fatalf("expected current_income_to_date=140, got %v", client.lastReq.CurrentIncomeToDate)
+	}
+}
+
+func TestRunUsesLatestActualEnteredDateInsteadOfTodayForObservedBoundary(t *testing.T) {
+	setForecastTodayForTest(t, time.Date(2026, 2, 2, 0, 0, 0, 0, time.UTC))
+
+	projectID := uuid.MustParse("99999999-9999-9999-9999-999999999999")
+	repo := &fakeRepo{
+		history: []sqlc.ActualIncomeDaily{
+			{IncomeDate: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), Amount: 50},
+			{IncomeDate: time.Date(2026, 2, 2, 0, 0, 0, 0, time.UTC), Amount: 50},
+			{IncomeDate: time.Date(2026, 2, 3, 0, 0, 0, 0, time.UTC), Amount: 50},
+			{IncomeDate: time.Date(2026, 2, 4, 0, 0, 0, 0, time.UTC), Amount: 50},
+			{IncomeDate: time.Date(2026, 2, 5, 0, 0, 0, 0, time.UTC), Amount: 50},
+		},
+	}
+	client := &fakeAnalyticsClient{response: AnalyticsResponse{
+		ModelVersion: "v1",
+		HorizonDays:  5,
+		Forecast: []AnalyticsPoint{
+			{Date: "2026-02-06", Yhat: 60, P10: 40, P90: 70},
+		},
+	}}
+	svc := NewService(repo, client)
+
+	_, err := svc.Run(context.Background(), projectID, 10)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	if len(client.lastReq.History) != 5 {
+		t.Fatalf("expected 5 observed days from latest entered income date, got %d", len(client.lastReq.History))
+	}
+	if client.lastReq.CurrentIncomeToDate != 250 {
+		t.Fatalf("expected current_income_to_date=250, got %v", client.lastReq.CurrentIncomeToDate)
+	}
+	if client.lastReq.HorizonDays != 5 {
+		t.Fatalf("expected horizon reduced to 5 remaining days, got %d", client.lastReq.HorizonDays)
+	}
+	lastHistoryDate := client.lastReq.History[len(client.lastReq.History)-1].Date
+	if lastHistoryDate != "2026-02-05" {
+		t.Fatalf("expected latest observed history date 2026-02-05, got %s", lastHistoryDate)
+	}
+}
+
+func TestRunFallsBackToTodayWhenNoActualIncomeRowsExist(t *testing.T) {
+	setForecastTodayForTest(t, time.Date(2026, 2, 2, 0, 0, 0, 0, time.UTC))
+
+	projectID := uuid.MustParse("12121212-1212-1212-1212-121212121212")
+	repo := &fakeRepo{}
+	client := &fakeAnalyticsClient{response: AnalyticsResponse{
+		ModelVersion: "v1",
+		HorizonDays:  8,
+		Forecast: []AnalyticsPoint{
+			{Date: "2026-02-03", Yhat: 10, P10: 8, P90: 14},
+		},
+	}}
+	svc := NewService(repo, client)
+
+	_, err := svc.Run(context.Background(), projectID, 10)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	if len(client.lastReq.History) != 2 {
+		t.Fatalf("expected fallback observed days = 2 from current date, got %d", len(client.lastReq.History))
+	}
+	if client.lastReq.HorizonDays != 8 {
+		t.Fatalf("expected horizon reduced to 8 remaining days, got %d", client.lastReq.HorizonDays)
+	}
+}
+
 func TestRunReturnsAnalyticsInvalidResponseWhenDateIsMalformed(t *testing.T) {
+	setForecastTodayForTest(t, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC))
+
 	projectID := uuid.MustParse("55555555-5555-5555-5555-555555555555")
 	repo := &fakeRepo{
 		history: []sqlc.ActualIncomeDaily{{IncomeDate: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), Amount: 100}},
@@ -253,6 +387,8 @@ func TestRunReturnsAnalyticsInvalidResponseWhenDateIsMalformed(t *testing.T) {
 }
 
 func TestRunClampsScenarioOrderingFromAnalyticsResponse(t *testing.T) {
+	setForecastTodayForTest(t, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC))
+
 	projectID := uuid.MustParse("77777777-7777-7777-7777-777777777777")
 	repo := &fakeRepo{
 		history: []sqlc.ActualIncomeDaily{{IncomeDate: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), Amount: 100}},
@@ -280,6 +416,8 @@ func TestRunClampsScenarioOrderingFromAnalyticsResponse(t *testing.T) {
 }
 
 func TestRunReturnsAnalyticsClientErrorsUnchanged(t *testing.T) {
+	setForecastTodayForTest(t, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC))
+
 	projectID := uuid.MustParse("66666666-6666-6666-6666-666666666666")
 	repo := &fakeRepo{
 		history: []sqlc.ActualIncomeDaily{{IncomeDate: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), Amount: 100}},
@@ -290,5 +428,21 @@ func TestRunReturnsAnalyticsClientErrorsUnchanged(t *testing.T) {
 	_, err := svc.Run(context.Background(), projectID, 1)
 	if !errors.Is(err, ErrAnalyticsUnavailable) {
 		t.Fatalf("expected ErrAnalyticsUnavailable, got %v", err)
+	}
+}
+
+func TestRunReturnsAnalyticsInvalidRequestUnchanged(t *testing.T) {
+	setForecastTodayForTest(t, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC))
+
+	projectID := uuid.MustParse("99999999-9999-9999-9999-999999999999")
+	repo := &fakeRepo{
+		history: []sqlc.ActualIncomeDaily{{IncomeDate: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), Amount: -25}},
+	}
+	client := &fakeAnalyticsClient{err: ErrAnalyticsInvalidRequest}
+	svc := NewService(repo, client)
+
+	_, err := svc.Run(context.Background(), projectID, 1)
+	if !errors.Is(err, ErrAnalyticsInvalidRequest) {
+		t.Fatalf("expected ErrAnalyticsInvalidRequest, got %v", err)
 	}
 }

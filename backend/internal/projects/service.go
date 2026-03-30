@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -22,6 +23,18 @@ type Service struct {
 type ProjectListItem struct {
 	sqlc.Project
 	CurrentUserRole string `json:"current_user_role"`
+}
+
+type CategoryFolderSummary struct {
+	Category                 string `json:"category"`
+	ActiveProjectsCount      int    `json:"active_projects_count"`
+	CompletedProjectsCount   int    `json:"completed_projects_count"`
+	HistoricalCampaignsCount int    `json:"historical_campaigns_count"`
+}
+
+type historicalCampaignCategoryCount struct {
+	Category string
+	Count    int
 }
 
 type ProjectInviteView struct {
@@ -110,6 +123,89 @@ func (s *Service) ListProjects(ctx context.Context, userID uuid.UUID) ([]Project
 		})
 	}
 	return items, nil
+}
+
+func (s *Service) ListCategoryFolders(ctx context.Context, userID uuid.UUID) ([]CategoryFolderSummary, error) {
+	if err := s.q.CompleteProjectsForUserIfDue(ctx, userID); err != nil {
+		return nil, err
+	}
+
+	projects, err := s.q.ListProjectsForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	historicalCounts, err := s.listHistoricalCampaignCountsByOwner(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	return buildCategoryFolderSummaries(projects, historicalCounts), nil
+}
+
+func (s *Service) listHistoricalCampaignCountsByOwner(ctx context.Context, userID uuid.UUID) ([]historicalCampaignCategoryCount, error) {
+	rows, err := s.pool.Query(ctx, `
+SELECT COALESCE(NULLIF(TRIM(category), ''), 'Общее') AS category,
+       COUNT(*)::integer AS historical_campaigns_count
+FROM historical_campaigns
+WHERE owner_user_id = $1
+GROUP BY 1
+ORDER BY 1
+`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]historicalCampaignCategoryCount, 0)
+	for rows.Next() {
+		var item historicalCampaignCategoryCount
+		if err := rows.Scan(&item.Category, &item.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func buildCategoryFolderSummaries(projects []sqlc.ListProjectsForUserRow, historicalCounts []historicalCampaignCategoryCount) []CategoryFolderSummary {
+	byCategory := make(map[string]*CategoryFolderSummary)
+
+	ensure := func(category string) *CategoryFolderSummary {
+		normalized := canonicalProjectCategory(category)
+		item, ok := byCategory[normalized]
+		if !ok {
+			item = &CategoryFolderSummary{Category: normalized}
+			byCategory[normalized] = item
+		}
+		return item
+	}
+
+	for _, project := range projects {
+		item := ensure(project.Category)
+		if project.Status == ProjectStatusCompleted {
+			item.CompletedProjectsCount++
+			continue
+		}
+		item.ActiveProjectsCount++
+	}
+
+	for _, count := range historicalCounts {
+		item := ensure(count.Category)
+		item.HistoricalCampaignsCount += count.Count
+	}
+
+	items := make([]CategoryFolderSummary, 0, len(byCategory))
+	for _, item := range byCategory {
+		items = append(items, *item)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return strings.ToLower(items[i].Category) < strings.ToLower(items[j].Category)
+	})
+	return items
 }
 
 func (s *Service) CreateProject(ctx context.Context, userID uuid.UUID, name, description string, durationDays int32, currencyCode, secondaryCurrencyCode, category string) (sqlc.Project, error) {
@@ -793,12 +889,17 @@ func normalizeSecondaryCurrencyCode(primary, secondary string) (*string, error) 
 }
 
 func normalizeProjectCategory(category string) (string, error) {
-	normalized := strings.TrimSpace(category)
-	if normalized == "" {
-		return "Общее", nil
-	}
+	normalized := canonicalProjectCategory(category)
 	if len(normalized) < 2 || len(normalized) > 80 {
 		return "", ErrInvalidProjectCategory
 	}
 	return normalized, nil
+}
+
+func canonicalProjectCategory(category string) string {
+	normalized := strings.TrimSpace(category)
+	if normalized == "" {
+		return "Общее"
+	}
+	return normalized
 }

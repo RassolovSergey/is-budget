@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"net/http"
 	"os"
 	"time"
@@ -135,8 +136,10 @@ func main() {
 			private.With(accountMutationLimiter.Middleware("auth_email")).Put("/auth/email", authHandler.UpdateEmail)
 			private.With(accountMutationLimiter.Middleware("auth_password")).Put("/auth/password", authHandler.UpdatePassword)
 			private.Post("/auth/avatar", authHandler.UploadAvatar)
+			private.Delete("/auth/avatar", authHandler.DeleteAvatar)
 
 			private.Get("/projects", projectsHandler.ListProjects)
+			private.Get("/projects/category-folders", projectsHandler.ListCategoryFolders)
 			private.Post("/projects", projectsHandler.CreateProject)
 
 			private.With(auth.RequireProjectPermission(q, auth.PermProjectRead)).Get("/projects/{projectId}", projectsHandler.GetProject)
@@ -234,28 +237,167 @@ func serveOpenAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 func serveSwaggerUI(w http.ResponseWriter, r *http.Request) {
+	specBytes, err := os.ReadFile("openapi.yaml")
+	if err != nil {
+		http.Error(w, "failed to load local OpenAPI schema", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(`<!doctype html>
+	_, _ = w.Write([]byte(buildOfflineAPIDocsHTML(string(specBytes))))
+}
+
+func buildOfflineAPIDocsHTML(openAPISpec string) string {
+	return fmt.Sprintf(`<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
     <title>IS Budget API Docs</title>
-    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        background: #f6f7fb;
+        color: #152033;
+      }
+      body {
+        margin: 0;
+        padding: 32px 20px 48px;
+        background:
+          radial-gradient(circle at top left, rgba(35, 90, 180, 0.10), transparent 34%%),
+          linear-gradient(180deg, #f8faff 0%%, #eef2f8 100%%);
+      }
+      .page {
+        max-width: 1180px;
+        margin: 0 auto;
+      }
+      .hero, .card {
+        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid rgba(21, 32, 51, 0.10);
+        border-radius: 18px;
+        box-shadow: 0 14px 32px rgba(21, 32, 51, 0.08);
+      }
+      .hero {
+        padding: 28px;
+        margin-bottom: 18px;
+      }
+      .eyebrow {
+        display: inline-block;
+        margin-bottom: 8px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #2f5fb6;
+      }
+      h1 {
+        margin: 0 0 10px;
+        font-size: 32px;
+        line-height: 1.15;
+      }
+      p {
+        margin: 0;
+        line-height: 1.55;
+      }
+      .muted {
+        color: #4f5c73;
+      }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 18px;
+      }
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 10px 14px;
+        border-radius: 12px;
+        border: 1px solid rgba(47, 95, 182, 0.18);
+        background: #f2f6ff;
+        color: #1d3f7a;
+        font-weight: 600;
+        text-decoration: none;
+      }
+      .button:hover {
+        background: #e7eefc;
+      }
+      .grid {
+        display: grid;
+        gap: 18px;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      }
+      .card {
+        padding: 20px;
+      }
+      h2 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+      ul {
+        margin: 0;
+        padding-left: 18px;
+        color: #344158;
+      }
+      li + li {
+        margin-top: 8px;
+      }
+      code, pre {
+        font-family: "Cascadia Code", "Fira Code", monospace;
+      }
+      pre {
+        margin: 0;
+        padding: 18px;
+        overflow: auto;
+        border-radius: 14px;
+        background: #111827;
+        color: #e5eefc;
+        line-height: 1.5;
+        font-size: 13px;
+      }
+    </style>
   </head>
   <body>
-    <div id="swagger-ui"></div>
-    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
-    <script>
-      window.ui = SwaggerUIBundle({
-        url: '/api/openapi.yaml',
-        dom_id: '#swagger-ui',
-        docExpansion: 'list',
-        tagsSorter: 'alpha',
-        operationsSorter: 'alpha'
-      });
-    </script>
+    <main class="page">
+      <section class="hero">
+        <span class="eyebrow">Offline API Docs</span>
+        <h1>IS Budget Backend API</h1>
+        <p class="muted">
+          Эта страница обслуживается полностью локально из backend и не зависит от внешнего CDN.
+          Источником истины остаётся актуальная схема OpenAPI.
+        </p>
+        <div class="actions">
+          <a class="button" href="/api/openapi.yaml">Открыть /api/openapi.yaml</a>
+          <a class="button" href="/openapi.yaml">Открыть /openapi.yaml</a>
+        </div>
+      </section>
+      <section class="grid">
+        <article class="card">
+          <h2>Что здесь проверять в демо</h2>
+          <ul>
+            <li>доступность локальной документации без интернета;</li>
+            <li>корректную отдачу raw schema по <code>/api/openapi.yaml</code>;</li>
+            <li>наличие ключевых auth, finance, forecast и historical campaign endpoints;</li>
+            <li>согласованность схемы с текущей реализацией backend.</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h2>Подсказка</h2>
+          <p class="muted">
+            Для richer-visualization можно открыть тот же <code>openapi.yaml</code> во внешнем viewer,
+            но для локальной демонстрации и проверки контракта этого экрана достаточно.
+          </p>
+        </article>
+      </section>
+      <section class="card" style="margin-top: 18px;">
+        <h2>Локальная схема OpenAPI</h2>
+        <pre>%s</pre>
+      </section>
+    </main>
   </body>
-</html>`))
+</html>`, html.EscapeString(openAPISpec))
 }
 
 func startProjectStatusWorker(q *sqlc.Queries) {

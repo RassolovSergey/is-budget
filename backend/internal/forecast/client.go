@@ -102,7 +102,10 @@ func (c *HTTPAnalyticsClient) Forecast(ctx context.Context, req AnalyticsRequest
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 300 {
+	if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+		return AnalyticsResponse{}, fmt.Errorf("%w: status %d", ErrAnalyticsInvalidRequest, resp.StatusCode)
+	}
+	if resp.StatusCode >= 500 {
 		return AnalyticsResponse{}, fmt.Errorf("%w: status %d", ErrAnalyticsUnavailable, resp.StatusCode)
 	}
 

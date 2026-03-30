@@ -223,6 +223,18 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '500':
           $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Auth]
+      summary: Delete current avatar
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Avatar removed
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/auth/avatar/{fileName}:
     get:
       tags: [Auth]
@@ -275,6 +287,25 @@ paths:
           description: Project created
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/projects/category-folders:
+    get:
+      tags: [Projects]
+      summary: List category folder summaries
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Category folder summary list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CategoryFolderSummary'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -925,6 +956,10 @@ paths:
       responses:
         '200':
           description: Current user income breakdown
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MyIncomeResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -1401,6 +1436,21 @@ components:
           type: string
           minLength: 2
           maxLength: 80
+    CategoryFolderSummary:
+      type: object
+      required: [category, active_projects_count, completed_projects_count, historical_campaigns_count]
+      properties:
+        category:
+          type: string
+        active_projects_count:
+          type: integer
+          minimum: 0
+        completed_projects_count:
+          type: integer
+          minimum: 0
+        historical_campaigns_count:
+          type: integer
+          minimum: 0
     AddMemberRequest:
       type: object
       required: [role]
@@ -1509,6 +1559,8 @@ components:
         level:
           type: integer
           minimum: 1
+        prepend_before_first:
+          type: boolean
     TaxRulesReorderRequest:
       type: object
       required: [ordered_ids]
@@ -1546,6 +1598,8 @@ components:
           minimum: 1
           maximum: 20
         applies_after_mandatory:
+          type: boolean
+        prepend_before_first:
           type: boolean
     ForecastRunRequest:
       type: object
@@ -1598,3 +1652,99 @@ components:
           type: string
         amount:
           type: number
+    MyIncomeItem:
+      type: object
+      required: [rule_id, recipient_name, responsibility, level, percent, project_amount, project_currency_code, user_amount, user_currency_code, conversion_rate_to_user]
+      properties:
+        rule_id:
+          type: string
+          format: uuid
+        recipient_name:
+          type: string
+        responsibility:
+          type: string
+        level:
+          type: integer
+        percent:
+          type: number
+        project_amount:
+          type: number
+        project_currency_code:
+          type: string
+          enum: [EUR, USD, RUB]
+        user_amount:
+          type: number
+        user_currency_code:
+          type: string
+          enum: [EUR, USD, RUB]
+        conversion_rate_to_user:
+          type: number
+    MyIncomeForecastScenario:
+      type: object
+      required: [projected_income_total, project_amount, user_amount]
+      properties:
+        projected_income_total:
+          type: number
+        project_amount:
+          type: number
+        user_amount:
+          type: number
+    MyIncomeForecastProjection:
+      type: object
+      required: [run_id, created_at, p10, yhat, p90]
+      properties:
+        run_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        p10:
+          $ref: '#/components/schemas/MyIncomeForecastScenario'
+        yhat:
+          $ref: '#/components/schemas/MyIncomeForecastScenario'
+        p90:
+          $ref: '#/components/schemas/MyIncomeForecastScenario'
+    MyIncomeResponse:
+      type: object
+      required: [project_id, project_currency_code, user_currency_code, income_total, expenses_total, net_profit_to_date, tax_total, available_for_sharing, distributed_amount, distributed_to_others, total_project_amount, total_user_amount, total_conversion_rate, matching_strategy, items]
+      properties:
+        project_id:
+          type: string
+          format: uuid
+        project_currency_code:
+          type: string
+          enum: [EUR, USD, RUB]
+        user_currency_code:
+          type: string
+          enum: [EUR, USD, RUB]
+        income_total:
+          type: number
+        expenses_total:
+          type: number
+        net_profit_to_date:
+          type: number
+        tax_total:
+          type: number
+        available_for_sharing:
+          type: number
+        distributed_amount:
+          type: number
+        distributed_to_others:
+          type: number
+        total_project_amount:
+          type: number
+        total_user_amount:
+          type: number
+        total_conversion_rate:
+          type: number
+        matching_strategy:
+          type: string
+        forecast_projection:
+          allOf:
+            - $ref: '#/components/schemas/MyIncomeForecastProjection'
+          nullable: true
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MyIncomeItem'

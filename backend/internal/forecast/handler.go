@@ -45,6 +45,7 @@ func (h *Handler) Run(w http.ResponseWriter, r *http.Request) {
 			"failed to run forecast",
 			common.ErrorMapping{Err: ErrInvalidHorizon, Status: http.StatusBadRequest, Code: "invalid_request"},
 			common.ErrorMapping{Err: ErrNoRemainingForecast, Status: http.StatusBadRequest, Code: "invalid_request"},
+			common.ErrorMapping{Err: ErrAnalyticsInvalidRequest, Status: http.StatusBadRequest, Code: "invalid_request", Message: "forecast request is incompatible with analytics contract"},
 			common.ErrorMapping{Err: ErrAnalyticsTimeout, Status: http.StatusGatewayTimeout, Code: "forecast_service_timeout", Message: "forecast service timeout"},
 			common.ErrorMapping{Err: ErrAnalyticsUnavailable, Status: http.StatusBadGateway, Code: "forecast_service_unavailable", Message: "forecast service unavailable"},
 			common.ErrorMapping{Err: ErrAnalyticsInvalidResponse, Status: http.StatusBadGateway, Code: "forecast_service_invalid_response", Message: "forecast service returned invalid response"},

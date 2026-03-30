@@ -61,6 +61,60 @@ func (s *Service) Create(ctx context.Context, req sqlc.CreateTaxRuleParams) (sql
 	return mapCreateTaxRuleRow(created), nil
 }
 
+func (s *Service) CreatePrepend(ctx context.Context, req sqlc.CreateTaxRuleParams) (sqlc.ProjectTaxRule, error) {
+	req.Name = strings.TrimSpace(req.Name)
+	req.Level = 1
+	if req.Level < 1 {
+		return sqlc.ProjectTaxRule{}, ErrInvalidTaxLevel
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return sqlc.ProjectTaxRule{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := s.q.WithTx(tx)
+	rows, err := qtx.ListTaxRulesByProject(ctx, req.ProjectID)
+	if err != nil {
+		return sqlc.ProjectTaxRule{}, err
+	}
+	rules := make([]sqlc.ProjectTaxRule, 0, len(rows))
+	for _, row := range rows {
+		rules = append(rules, mapTaxRuleRow(row))
+	}
+
+	shifted := shiftTaxRulesForPrepend(rules)
+	tempBase := int32(len(shifted) + 1000)
+	for idx, rule := range shifted {
+		if err := qtx.UpdateTaxRuleLevel(ctx, sqlc.UpdateTaxRuleLevelParams{
+			ProjectID: req.ProjectID,
+			ID:        rule.ID,
+			Level:     tempBase + int32(idx),
+		}); err != nil {
+			return sqlc.ProjectTaxRule{}, err
+		}
+	}
+	for _, rule := range shifted {
+		if err := qtx.UpdateTaxRuleLevel(ctx, sqlc.UpdateTaxRuleLevelParams{
+			ProjectID: req.ProjectID,
+			ID:        rule.ID,
+			Level:     rule.Level,
+		}); err != nil {
+			return sqlc.ProjectTaxRule{}, err
+		}
+	}
+
+	created, err := qtx.CreateTaxRule(ctx, req)
+	if err != nil {
+		return sqlc.ProjectTaxRule{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return sqlc.ProjectTaxRule{}, err
+	}
+	return mapCreateTaxRuleRow(created), nil
+}
+
 func (s *Service) Update(ctx context.Context, req sqlc.UpdateTaxRuleParams) (sqlc.ProjectTaxRule, error) {
 	req.Name = strings.TrimSpace(req.Name)
 	if req.Level < 1 {
@@ -275,4 +329,14 @@ func mapUpdateTaxRuleRow(row sqlc.UpdateTaxRuleRow) sqlc.ProjectTaxRule {
 		UpdatedAt: row.UpdatedAt,
 		Level:     row.Level,
 	}
+}
+
+func shiftTaxRulesForPrepend(rules []sqlc.ProjectTaxRule) []sqlc.ProjectTaxRule {
+	shifted := make([]sqlc.ProjectTaxRule, 0, len(rules))
+	for _, rule := range rules {
+		next := rule
+		next.Level = rule.Level + 1
+		shifted = append(shifted, next)
+	}
+	return shifted
 }

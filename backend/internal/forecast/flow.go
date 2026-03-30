@@ -23,6 +23,11 @@ type preparedRunInput struct {
 	Seed                 int64
 }
 
+var forecastTodayUTC = func() time.Time {
+	now := time.Now().UTC()
+	return normalizeUTCDate(now)
+}
+
 func (s *Service) prepareRunInput(ctx context.Context, projectID uuid.UUID, horizon int) (preparedRunInput, error) {
 	// Сначала собираем весь наблюдаемый контекст проекта, чтобы analytics-service получал один стабильный input.
 	ownerUserID, category, durationDays, campaignStartDate, err := s.repo.GetProjectOwnerAndCategoryAndDuration(ctx, projectID)
@@ -38,7 +43,9 @@ func (s *Service) prepareRunInput(ctx context.Context, projectID uuid.UUID, hori
 	if err != nil {
 		return preparedRunInput{}, err
 	}
-	history, currentIncomeTotal := buildObservedHistory(historyRows, campaignStartDate, campaignEndDate)
+	observedThroughDate := resolveObservedThroughDate(historyRows, campaignStartDate, campaignEndDate, forecastTodayUTC())
+	history, currentIncomeTotal := buildObservedHistory(historyRows, campaignStartDate, observedThroughDate)
+	observedDays := countObservedCampaignDays(campaignStartDate, observedThroughDate)
 
 	actualExpenses, err := s.repo.ListActualExpensesByProject(ctx, projectID)
 	if err != nil {
@@ -46,7 +53,7 @@ func (s *Service) prepareRunInput(ctx context.Context, projectID uuid.UUID, hori
 	}
 	currentAdSpend := calculateAdSpend(actualExpenses)
 
-	resolvedHorizon, err := resolveForecastHorizon(durationDays, len(history), horizon)
+	resolvedHorizon, err := resolveForecastHorizon(durationDays, observedDays, horizon)
 	if err != nil {
 		return preparedRunInput{}, err
 	}
@@ -72,20 +79,74 @@ func (s *Service) prepareRunInput(ctx context.Context, projectID uuid.UUID, hori
 	}, nil
 }
 
-func buildObservedHistory(rows []sqlc.ActualIncomeDaily, campaignStartDate, campaignEndDate time.Time) ([]HistoryPoint, float64) {
-	history := make([]HistoryPoint, 0, len(rows))
-	currentIncomeTotal := 0.0
+func normalizeUTCDate(value time.Time) time.Time {
+	return time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, time.UTC)
+}
+
+func countObservedCampaignDays(campaignStartDate, observedThroughDate time.Time) int {
+	startDate := normalizeUTCDate(campaignStartDate)
+	endDate := normalizeUTCDate(observedThroughDate)
+	if endDate.Before(startDate) {
+		return 0
+	}
+	return int(endDate.Sub(startDate).Hours()/24) + 1
+}
+
+func resolveObservedThroughDate(rows []sqlc.ActualIncomeDaily, campaignStartDate, campaignEndDate, fallbackDate time.Time) time.Time {
+	startDate := normalizeUTCDate(campaignStartDate)
+	endDate := normalizeUTCDate(campaignEndDate)
+
+	var latestActualDate time.Time
 	for _, row := range rows {
-		incomeDate := time.Date(row.IncomeDate.Year(), row.IncomeDate.Month(), row.IncomeDate.Day(), 0, 0, 0, 0, time.UTC)
-		if incomeDate.Before(campaignStartDate) || incomeDate.After(campaignEndDate) {
+		incomeDate := normalizeUTCDate(row.IncomeDate)
+		if incomeDate.Before(startDate) || incomeDate.After(endDate) {
 			continue
 		}
-		history = append(history, HistoryPoint{
-			Date:   incomeDate.Format(common.DateLayout),
-			Amount: row.Amount,
-		})
+		if latestActualDate.IsZero() || incomeDate.After(latestActualDate) {
+			latestActualDate = incomeDate
+		}
+	}
+	if !latestActualDate.IsZero() {
+		return latestActualDate
+	}
+
+	observedThroughDate := normalizeUTCDate(fallbackDate)
+	if observedThroughDate.After(endDate) {
+		observedThroughDate = endDate
+	}
+	if observedThroughDate.Before(startDate) {
+		observedThroughDate = startDate
+	}
+	return observedThroughDate
+}
+
+func buildObservedHistory(rows []sqlc.ActualIncomeDaily, campaignStartDate, observedThroughDate time.Time) ([]HistoryPoint, float64) {
+	startDate := normalizeUTCDate(campaignStartDate)
+	endDate := normalizeUTCDate(observedThroughDate)
+	if endDate.Before(startDate) {
+		return []HistoryPoint{}, 0
+	}
+
+	amountByDate := make(map[string]float64, len(rows))
+	currentIncomeTotal := 0.0
+	for _, row := range rows {
+		incomeDate := normalizeUTCDate(row.IncomeDate)
+		if incomeDate.Before(startDate) || incomeDate.After(endDate) {
+			continue
+		}
+		amountByDate[incomeDate.Format(common.DateLayout)] += row.Amount
 		currentIncomeTotal += row.Amount
 	}
+
+	history := make([]HistoryPoint, 0, countObservedCampaignDays(startDate, endDate))
+	for cursor := startDate; !cursor.After(endDate); cursor = cursor.AddDate(0, 0, 1) {
+		dateKey := cursor.Format(common.DateLayout)
+		history = append(history, HistoryPoint{
+			Date:   dateKey,
+			Amount: amountByDate[dateKey],
+		})
+	}
+
 	return history, currentIncomeTotal
 }
 

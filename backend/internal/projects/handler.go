@@ -36,6 +36,20 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 	common.WriteJSON(w, http.StatusOK, items)
 }
 
+func (h *Handler) ListCategoryFolders(w http.ResponseWriter, r *http.Request) {
+	user, ok := auth.UserFromContext(r.Context())
+	if !ok {
+		common.WriteError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	items, err := h.svc.ListCategoryFolders(r.Context(), user.ID)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to list category folders")
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, items)
+}
+
 func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	user, ok := auth.UserFromContext(r.Context())
 	if !ok {

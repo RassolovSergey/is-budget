@@ -92,17 +92,15 @@ func (s *Service) UpsertCumulative(ctx context.Context, projectID uuid.UUID, poi
 	}()
 	qtx := s.q.WithTx(tx)
 
-	existing, err := qtx.ListIncomeDailyByProject(ctx, projectID)
-	if err != nil {
+	// The cumulative UI submits an authoritative campaign-scoped series.
+	// Old rows before the first submitted day are stale residues and must not
+	// shift the day-1 baseline away from zero.
+	if _, err := tx.Exec(ctx, `
+DELETE FROM actual_income_daily
+WHERE project_id = $1
+  AND income_date < $2
+`, projectID, firstDate); err != nil {
 		return nil, err
-	}
-
-	runningCumulative := 0.0
-	for _, row := range existing {
-		rowDate := time.Date(row.IncomeDate.Year(), row.IncomeDate.Month(), row.IncomeDate.Day(), 0, 0, 0, 0, time.UTC)
-		if rowDate.Before(firstDate) {
-			runningCumulative += row.Amount
-		}
 	}
 
 	deleteDates := make([]time.Time, 0, len(targetDates))
@@ -116,7 +114,7 @@ func (s *Service) UpsertCumulative(ctx context.Context, projectID uuid.UUID, poi
 		return nil, err
 	}
 
-	upserts := buildDailyDeltaUpserts(projectID, runningCumulative, normalizedPoints)
+	upserts := buildDailyDeltaUpserts(projectID, normalizedPoints)
 	for _, upsert := range upserts {
 		if _, err := qtx.UpsertIncomeDaily(ctx, upsert); err != nil {
 			return nil, err
@@ -168,11 +166,11 @@ func normalizeCumulativePoints(points []CumulativePointInput) []normalizedCumula
 	return out
 }
 
-func buildDailyDeltaUpserts(projectID uuid.UUID, priorCumulative float64, points []normalizedCumulativePoint) []sqlc.UpsertIncomeDailyParams {
+func buildDailyDeltaUpserts(projectID uuid.UUID, points []normalizedCumulativePoint) []sqlc.UpsertIncomeDailyParams {
 	if len(points) == 0 {
 		return nil
 	}
-	running := priorCumulative
+	running := 0.0
 	out := make([]sqlc.UpsertIncomeDailyParams, 0, len(points))
 	for _, point := range points {
 		targetCumulative := running

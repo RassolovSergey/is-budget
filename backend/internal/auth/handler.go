@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"isbudget/backend/internal/common"
+	"isbudget/backend/internal/db/sqlc"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
@@ -182,6 +183,11 @@ func (h *Handler) UploadAvatar(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
+	current, err := h.svc.Me(r.Context(), user.ID.String())
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to load current user")
+		return
+	}
 	if err := r.ParseMultipartForm(8 << 20); err != nil {
 		common.WriteError(w, http.StatusBadRequest, "invalid multipart form")
 		return
@@ -239,6 +245,38 @@ func (h *Handler) UploadAvatar(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusInternalServerError, "failed to update avatar path")
 		return
 	}
+
+	if err := h.removeAvatarFile(previousAvatarPath(current)); err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to replace previous avatar")
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, updated)
+}
+
+func (h *Handler) DeleteAvatar(w http.ResponseWriter, r *http.Request) {
+	user, ok := UserFromContext(r.Context())
+	if !ok {
+		common.WriteError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	current, err := h.svc.Me(r.Context(), user.ID.String())
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to load current user")
+		return
+	}
+
+	updated, err := h.svc.UpdateAvatarPath(r.Context(), user.ID.String(), nil)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to remove avatar")
+		return
+	}
+
+	if err := h.removeAvatarFile(previousAvatarPath(current)); err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to remove avatar file")
+		return
+	}
+
 	common.WriteJSON(w, http.StatusOK, updated)
 }
 
@@ -264,6 +302,48 @@ func isAllowedAvatarContent(ext string, header []byte) bool {
 	default:
 		return false
 	}
+}
+
+func previousAvatarPath(user sqlc.User) *string {
+	if user.AvatarPath == nil {
+		return nil
+	}
+	path := strings.TrimSpace(*user.AvatarPath)
+	if path == "" {
+		return nil
+	}
+	return &path
+}
+
+func (h *Handler) removeAvatarFile(avatarPath *string) error {
+	fileName, ok := avatarFileNameFromPath(avatarPath)
+	if !ok {
+		return nil
+	}
+	target := filepath.Join(h.avatarDir, fileName)
+	if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func avatarFileNameFromPath(avatarPath *string) (string, bool) {
+	if avatarPath == nil {
+		return "", false
+	}
+	path := strings.TrimSpace(*avatarPath)
+	if path == "" {
+		return "", false
+	}
+	const prefix = "/auth/avatar/"
+	if !strings.HasPrefix(path, prefix) {
+		return "", false
+	}
+	fileName := strings.TrimPrefix(path, prefix)
+	if fileName == "" || fileName != filepath.Base(fileName) || strings.Contains(fileName, "..") {
+		return "", false
+	}
+	return fileName, true
 }
 
 func (h *Handler) GetAvatar(w http.ResponseWriter, r *http.Request) {

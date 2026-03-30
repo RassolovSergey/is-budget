@@ -2,12 +2,10 @@ module isbudget/backend
 
 go 1.23.0
 
-toolchain go1.23.12
-
 require (
-	github.com/go-pdf/fpdf v0.9.0
 	github.com/go-chi/chi/v5 v5.1.0
 	github.com/go-chi/cors v1.2.1
+	github.com/go-pdf/fpdf v0.9.0
 	github.com/go-playground/validator/v10 v10.24.0
 	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/golang-migrate/migrate/v4 v4.18.1

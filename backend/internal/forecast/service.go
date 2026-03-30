@@ -20,6 +20,7 @@ import (
 var (
 	ErrInvalidHorizon           = errors.New("horizon_days must be between 1 and 30")
 	ErrNoRemainingForecast      = errors.New("no remaining campaign days for forecast")
+	ErrAnalyticsInvalidRequest  = errors.New("analytics service rejected request")
 	ErrAnalyticsUnavailable     = errors.New("analytics service unavailable")
 	ErrAnalyticsTimeout         = errors.New("analytics service timeout")
 	ErrAnalyticsInvalidResponse = errors.New("analytics service invalid response")

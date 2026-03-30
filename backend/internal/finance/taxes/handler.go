@@ -42,12 +42,25 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	item, err := h.svc.Create(r.Context(), sqlc.CreateTaxRuleParams{
+	params := sqlc.CreateTaxRuleParams{
 		ProjectID: projectID,
 		Name:      req.Name,
 		Percent:   req.Percent,
 		Level:     req.Level,
-	})
+	}
+	if req.PrependBeforeFirst {
+		params.Level = 1
+	}
+
+	var (
+		item sqlc.ProjectTaxRule
+		err  error
+	)
+	if req.PrependBeforeFirst {
+		item, err = h.svc.CreatePrepend(r.Context(), params)
+	} else {
+		item, err = h.svc.Create(r.Context(), params)
+	}
 	if err != nil {
 		common.WriteMappedError(w, err, http.StatusInternalServerError, "create_tax_rule_failed", "failed to create tax rule",
 			common.ErrorMapping{Err: ErrInvalidTaxLevel, Status: http.StatusBadRequest, Code: "invalid_request"},

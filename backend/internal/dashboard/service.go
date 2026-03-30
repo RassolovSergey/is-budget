@@ -48,6 +48,26 @@ type Response struct {
 	LastForecastRun     *LastForecastRunSummary  `json:"last_forecast_run"`
 }
 
+func normalizeUTCDate(value time.Time) time.Time {
+	return time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, time.UTC)
+}
+
+func resolveDashboardIncomeRange(project sqlc.GetProjectByIDRow, days int, now time.Time) (time.Time, time.Time) {
+	to := normalizeUTCDate(now.UTC())
+	from := to.AddDate(0, 0, -(days - 1))
+
+	if project.ActivatedAt == nil {
+		return from, to
+	}
+
+	campaignStart := normalizeUTCDate(project.ActivatedAt.UTC())
+	campaignEnd := campaignStart
+	if project.DurationDays > 1 {
+		campaignEnd = campaignStart.AddDate(0, 0, int(project.DurationDays)-1)
+	}
+	return campaignStart, campaignEnd
+}
+
 func (s *Service) Get(ctx context.Context, projectID uuid.UUID, days int) (Response, error) {
 	if days <= 0 {
 		days = 30
@@ -55,14 +75,20 @@ func (s *Service) Get(ctx context.Context, projectID uuid.UUID, days int) (Respo
 	if days > 365 {
 		days = 365
 	}
-	to := time.Now().UTC()
-	to = time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, time.UTC)
+	project, err := s.q.GetProjectByID(ctx, projectID)
+	if err != nil {
+		return Response{}, err
+	}
+
+	now := time.Now().UTC()
+	incomeFrom, incomeTo := resolveDashboardIncomeRange(project, days, now)
+	to := normalizeUTCDate(now)
 	from := to.AddDate(0, 0, -(days - 1))
 
 	incomeSeries, err := s.q.ListIncomeDailyByProjectRange(ctx, sqlc.ListIncomeDailyByProjectRangeParams{
 		ProjectID: projectID,
-		FromDate:  from,
-		ToDate:    to,
+		FromDate:  incomeFrom,
+		ToDate:    incomeTo,
 	})
 	if err != nil {
 		return Response{}, err

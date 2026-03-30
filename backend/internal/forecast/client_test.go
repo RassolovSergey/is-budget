@@ -22,6 +22,22 @@ func TestHTTPAnalyticsClientMapsUnavailableStatus(t *testing.T) {
 	}
 }
 
+func TestHTTPAnalyticsClientMapsInvalidRequestStatus(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+	}))
+	defer ts.Close()
+
+	client := NewHTTPAnalyticsClient(ts.URL)
+	_, err := client.Forecast(context.Background(), AnalyticsRequest{})
+	if !errors.Is(err, ErrAnalyticsInvalidRequest) {
+		t.Fatalf("expected ErrAnalyticsInvalidRequest, got %v", err)
+	}
+	if errors.Is(err, ErrAnalyticsUnavailable) {
+		t.Fatalf("did not expect ErrAnalyticsUnavailable for 422, got %v", err)
+	}
+}
+
 func TestHTTPAnalyticsClientMapsInvalidResponse(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

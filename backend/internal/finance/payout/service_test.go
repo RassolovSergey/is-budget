@@ -13,15 +13,18 @@ import (
 )
 
 type fakeRepo struct {
-	summary      sqlc.FinanceSummary
-	rules        []sqlc.ProfitShareRule
-	taxRules     []sqlc.ProjectTaxRule
-	project      sqlc.Project
-	user         sqlc.User
-	members      []sqlc.ProjectMemberWithUser
-	currencyRate map[string]sqlc.CurrencyRate
-	lastCreate   sqlc.CreateProfitShareRuleParams
-	createCalled bool
+	summary        sqlc.FinanceSummary
+	rules          []sqlc.ProfitShareRule
+	taxRules       []sqlc.ProjectTaxRule
+	project        sqlc.Project
+	user           sqlc.User
+	members        []sqlc.ProjectMemberWithUser
+	currencyRate   map[string]sqlc.CurrencyRate
+	forecastRun    sqlc.ForecastRun
+	forecastPoints []sqlc.ForecastPoint
+	lastCreate     sqlc.CreateProfitShareRuleParams
+	createCalled   bool
+	prependCalled  bool
 }
 
 func (f *fakeRepo) GetFinanceSummaryByProject(ctx context.Context, projectID uuid.UUID) (sqlc.FinanceSummary, error) {
@@ -92,6 +95,17 @@ func (f *fakeRepo) ListTaxRulesByProject(ctx context.Context, projectID uuid.UUI
 	return f.taxRules, nil
 }
 
+func (f *fakeRepo) GetLatestForecastRunByProject(ctx context.Context, projectID uuid.UUID) (sqlc.ForecastRun, error) {
+	if f.forecastRun.ID == uuid.Nil {
+		return sqlc.ForecastRun{}, pgx.ErrNoRows
+	}
+	return f.forecastRun, nil
+}
+
+func (f *fakeRepo) ListForecastPointsByRun(ctx context.Context, runID uuid.UUID) ([]sqlc.ForecastPoint, error) {
+	return append([]sqlc.ForecastPoint(nil), f.forecastPoints...), nil
+}
+
 func (f *fakeRepo) StorePayouts(ctx context.Context, projectID uuid.UUID, calculatedAt time.Time, items []PreviewItem) ([]sqlc.Payout, error) {
 	out := make([]sqlc.Payout, 0, len(items))
 	for _, item := range items {
@@ -128,6 +142,27 @@ func (f *fakeRepo) CreateProfitShareRule(ctx context.Context, req sqlc.CreatePro
 		Level:                 req.Level,
 		AppliesAfterMandatory: req.AppliesAfterMandatory,
 	}, nil
+}
+
+func (f *fakeRepo) CreateProfitShareRulePrepend(ctx context.Context, req sqlc.CreateProfitShareRuleParams) (sqlc.ProfitShareRule, error) {
+	f.lastCreate = req
+	f.createCalled = true
+	f.prependCalled = true
+	shifted := shiftProfitShareRulesForPrepend(f.rules)
+	f.rules = append([]sqlc.ProfitShareRule(nil), shifted...)
+	created := sqlc.ProfitShareRule{
+		ID:                    uuid.New(),
+		ProjectID:             req.ProjectID,
+		RecipientUserID:       req.RecipientUserID,
+		RecipientName:         req.RecipientName,
+		Responsibility:        req.Responsibility,
+		CurrencyCode:          req.CurrencyCode,
+		Percent:               req.Percent,
+		Level:                 1,
+		AppliesAfterMandatory: false,
+	}
+	f.rules = append(f.rules, created)
+	return created, nil
 }
 
 func (f *fakeRepo) UpdateProfitShareRule(ctx context.Context, req sqlc.UpdateProfitShareRuleParams) (sqlc.ProfitShareRule, error) {
@@ -426,6 +461,44 @@ func TestCreateRuleAllowsDifferentLevelBudget(t *testing.T) {
 	}
 	if !repo.createCalled {
 		t.Fatal("expected create to be called for valid rule")
+	}
+}
+
+func TestCreateRulePrependShiftsExistingLevels(t *testing.T) {
+	projectID := uuid.New()
+	repo := &fakeRepo{
+		rules: []sqlc.ProfitShareRule{
+			{ID: uuid.New(), ProjectID: projectID, RecipientName: "Level1", Responsibility: "Lead", Percent: 40, Level: 1},
+			{ID: uuid.New(), ProjectID: projectID, RecipientName: "Level2", Responsibility: "Artist", Percent: 30, Level: 2, AppliesAfterMandatory: true},
+			{ID: uuid.New(), ProjectID: projectID, RecipientName: "Level3", Responsibility: "QA", Percent: 20, Level: 3, AppliesAfterMandatory: true},
+		},
+		project: sqlc.Project{ID: projectID, CurrencyCode: "EUR"},
+	}
+	svc := NewService(repo)
+
+	created, err := svc.CreateRulePrepend(context.Background(), sqlc.CreateProfitShareRuleParams{
+		ProjectID:      projectID,
+		RecipientName:  "Prepended",
+		Responsibility: "Producer",
+		Percent:        15,
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !repo.prependCalled {
+		t.Fatal("expected prepend create to be called")
+	}
+	if created.Level != 1 {
+		t.Fatalf("expected created rule level 1, got %d", created.Level)
+	}
+	if len(repo.rules) != 4 {
+		t.Fatalf("expected 4 rules after prepend, got %d", len(repo.rules))
+	}
+	if repo.rules[0].Level != 2 || repo.rules[1].Level != 3 || repo.rules[2].Level != 4 {
+		t.Fatalf("expected existing levels to shift to 2,3,4, got %d,%d,%d", repo.rules[0].Level, repo.rules[1].Level, repo.rules[2].Level)
+	}
+	if repo.lastCreate.Level != 1 {
+		t.Fatalf("expected prepend request to create level 1, got %d", repo.lastCreate.Level)
 	}
 }
 
@@ -743,5 +816,156 @@ func TestMyIncomeMatchesByEmailAndConvertsToUserCurrency(t *testing.T) {
 	}
 	if got.TotalUserAmount != 10000 {
 		t.Fatalf("expected total user amount 10000 RUB, got %.2f", got.TotalUserAmount)
+	}
+	if got.ForecastProjection != nil {
+		t.Fatalf("expected no forecast projection without forecast run, got %+v", got.ForecastProjection)
+	}
+}
+
+func TestMyIncomeAddsForecastProjectionWithoutChangingCurrentIncome(t *testing.T) {
+	projectID := uuid.New()
+	userID := uuid.New()
+	runID := uuid.New()
+	repo := &fakeRepo{
+		summary: sqlc.FinanceSummary{
+			IncomeTotal:   1000,
+			ExpensesTotal: 100,
+		},
+		project: sqlc.Project{
+			ID:           projectID,
+			CurrencyCode: "EUR",
+		},
+		user: sqlc.User{
+			ID:                  userID,
+			Email:               "pm@example.com",
+			FullName:            "PM",
+			DefaultCurrencyCode: "EUR",
+		},
+		rules: []sqlc.ProfitShareRule{
+			{
+				ID:              uuid.New(),
+				ProjectID:       projectID,
+				RecipientUserID: &userID,
+				RecipientName:   "pm@example.com",
+				Responsibility:  "Administrator residual",
+				CurrencyCode:    "EUR",
+				Percent:         100,
+				Level:           1,
+			},
+		},
+		taxRules: []sqlc.ProjectTaxRule{
+			{ID: uuid.New(), ProjectID: projectID, Percent: 10, Level: 1},
+		},
+		forecastRun: sqlc.ForecastRun{
+			ID:        runID,
+			ProjectID: projectID,
+			CreatedAt: time.Now().UTC(),
+		},
+		forecastPoints: []sqlc.ForecastPoint{
+			{ID: uuid.New(), RunID: runID, P10: 100, Yhat: 200, P90: 400},
+			{ID: uuid.New(), RunID: runID, P10: 50, Yhat: 100, P90: 200},
+		},
+	}
+
+	svc := NewService(repo)
+	got, err := svc.MyIncome(context.Background(), projectID, userID)
+	if err != nil {
+		t.Fatalf("MyIncome returned error: %v", err)
+	}
+
+	if got.TotalProjectAmount != 810 {
+		t.Fatalf("expected current total project amount 810, got %.2f", got.TotalProjectAmount)
+	}
+	if got.ForecastProjection == nil {
+		t.Fatalf("expected forecast projection, got nil")
+	}
+	if got.ForecastProjection.P10.ProjectedIncomeTotal != 1150 {
+		t.Fatalf("expected projected income p10 1150, got %.2f", got.ForecastProjection.P10.ProjectedIncomeTotal)
+	}
+	if got.ForecastProjection.Yhat.ProjectedIncomeTotal != 1300 {
+		t.Fatalf("expected projected income yhat 1300, got %.2f", got.ForecastProjection.Yhat.ProjectedIncomeTotal)
+	}
+	if got.ForecastProjection.P90.ProjectedIncomeTotal != 1600 {
+		t.Fatalf("expected projected income p90 1600, got %.2f", got.ForecastProjection.P90.ProjectedIncomeTotal)
+	}
+	if got.ForecastProjection.P10.UserAmount != 945 {
+		t.Fatalf("expected p10 user amount 945, got %.2f", got.ForecastProjection.P10.UserAmount)
+	}
+	if got.ForecastProjection.Yhat.UserAmount != 1080 {
+		t.Fatalf("expected yhat user amount 1080, got %.2f", got.ForecastProjection.Yhat.UserAmount)
+	}
+	if got.ForecastProjection.P90.UserAmount != 1350 {
+		t.Fatalf("expected p90 user amount 1350, got %.2f", got.ForecastProjection.P90.UserAmount)
+	}
+	if got.TotalUserAmount != got.TotalProjectAmount {
+		t.Fatalf("expected current income conversion to stay unchanged, got project %.2f user %.2f", got.TotalProjectAmount, got.TotalUserAmount)
+	}
+}
+
+func TestMyIncomeForecastProjectionRespectsProfitShareRules(t *testing.T) {
+	projectID := uuid.New()
+	userID := uuid.New()
+	otherUserID := uuid.New()
+	runID := uuid.New()
+	repo := &fakeRepo{
+		summary: sqlc.FinanceSummary{
+			IncomeTotal:   1000,
+			ExpensesTotal: 100,
+		},
+		project: sqlc.Project{
+			ID:           projectID,
+			CurrencyCode: "EUR",
+		},
+		user: sqlc.User{
+			ID:                  userID,
+			Email:               "artist@example.com",
+			FullName:            "Artist",
+			DefaultCurrencyCode: "EUR",
+		},
+		rules: []sqlc.ProfitShareRule{
+			{
+				ID:              uuid.New(),
+				ProjectID:       projectID,
+				RecipientUserID: &userID,
+				RecipientName:   "artist@example.com",
+				Responsibility:  "Artist",
+				CurrencyCode:    "EUR",
+				Percent:         50,
+				Level:           1,
+			},
+			{
+				ID:              uuid.New(),
+				ProjectID:       projectID,
+				RecipientUserID: &otherUserID,
+				RecipientName:   "other@example.com",
+				Responsibility:  "Support",
+				CurrencyCode:    "EUR",
+				Percent:         50,
+				Level:           1,
+			},
+		},
+		taxRules: []sqlc.ProjectTaxRule{
+			{ID: uuid.New(), ProjectID: projectID, Percent: 20, Level: 1},
+		},
+		forecastRun: sqlc.ForecastRun{
+			ID:        runID,
+			ProjectID: projectID,
+			CreatedAt: time.Now().UTC(),
+		},
+		forecastPoints: []sqlc.ForecastPoint{
+			{ID: uuid.New(), RunID: runID, P10: 100, Yhat: 200, P90: 300},
+		},
+	}
+
+	svc := NewService(repo)
+	got, err := svc.MyIncome(context.Background(), projectID, userID)
+	if err != nil {
+		t.Fatalf("MyIncome returned error: %v", err)
+	}
+	if got.ForecastProjection == nil {
+		t.Fatalf("expected forecast projection, got nil")
+	}
+	if got.ForecastProjection.Yhat.UserAmount != 440 {
+		t.Fatalf("expected yhat user amount 440 with 20%% tax and 50%% share, got %.2f", got.ForecastProjection.Yhat.UserAmount)
 	}
 }

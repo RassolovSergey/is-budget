@@ -53,16 +53,33 @@ func (h *Handler) CreateRule(w http.ResponseWriter, r *http.Request) {
 		}
 		recipientUserID = &id
 	}
-	item, err := h.svc.CreateRule(r.Context(), sqlc.CreateProfitShareRuleParams{
-		ProjectID:             projectID,
-		RecipientUserID:       recipientUserID,
-		RecipientName:         req.RecipientName,
-		Responsibility:        req.Responsibility,
-		CurrencyCode:          req.CurrencyCode,
-		Percent:               req.Percent,
-		Level:                 req.Level,
-		AppliesAfterMandatory: req.AppliesAfterMandatory,
-	})
+	var (
+		item sqlc.ProfitShareRule
+		err  error
+	)
+	if req.PrependBeforeFirst {
+		item, err = h.svc.CreateRulePrepend(r.Context(), sqlc.CreateProfitShareRuleParams{
+			ProjectID:             projectID,
+			RecipientUserID:       recipientUserID,
+			RecipientName:         req.RecipientName,
+			Responsibility:        req.Responsibility,
+			CurrencyCode:          req.CurrencyCode,
+			Percent:               req.Percent,
+			Level:                 1,
+			AppliesAfterMandatory: false,
+		})
+	} else {
+		item, err = h.svc.CreateRule(r.Context(), sqlc.CreateProfitShareRuleParams{
+			ProjectID:             projectID,
+			RecipientUserID:       recipientUserID,
+			RecipientName:         req.RecipientName,
+			Responsibility:        req.Responsibility,
+			CurrencyCode:          req.CurrencyCode,
+			Percent:               req.Percent,
+			Level:                 req.Level,
+			AppliesAfterMandatory: req.AppliesAfterMandatory,
+		})
+	}
 	if err != nil {
 		common.WriteMappedError(w, err, http.StatusInternalServerError, "create_profit_share_rule_failed", "failed to create profit share rule",
 			common.ErrorMapping{Err: ErrRulePercentOverflow, Status: http.StatusBadRequest, Code: "invalid_request"},

@@ -8,7 +8,7 @@ import { AppShell } from "../../../../components/AppShell";
 import { useConfirm } from "../../../../components/ConfirmProvider";
 import { useLocale } from "../../../../components/LocaleProvider";
 import { ProjectNav } from "../../../../components/ProjectNav";
-import { apiDownload, apiRequest } from "../../../../lib/api";
+import { ApiError, apiDownload, apiRequest } from "../../../../lib/api";
 import { money } from "../../../../lib/format";
 import type { Locale } from "../../../../lib/i18n";
 import { parseMemberLookup } from "../../../../lib/memberLookup";
@@ -37,6 +37,36 @@ const MAX_PROFIT_LEVEL = 20;
 
 function levelLabel(level: number, locale: Locale): string {
   return locale === "en" ? `Level ${level}` : `Уровень ${level}`;
+}
+
+function normalizeProfitShareRuleError(err: unknown, locale: Locale): string {
+  const tr = (ru: string, en: string) => (locale === "en" ? en : ru);
+  const message = err instanceof Error ? err.message : "";
+
+  if (err instanceof ApiError) {
+    if (err.status === 400 && err.code === "invalid_request" && err.message === "recipient_user_id must belong to a project member") {
+      return tr(
+        "Выберите корректного участника проекта для привязки правила.",
+        "Select a valid project member to bind this rule."
+      );
+    }
+
+    if (err.status === 400 && err.code === "validation_error" && err.details?.recipient_user_id) {
+      return tr(
+        "Некорректный идентификатор участника. Выберите получателя из списка команды.",
+        "Invalid member identifier. Select the recipient from the project team list."
+      );
+    }
+
+    if (err.status === 400) {
+      return tr(
+        "Не удалось сохранить правило. Проверьте поля формы и повторите.",
+        "Failed to save the rule. Check the form fields and try again."
+      );
+    }
+  }
+
+  return message || tr("Не удалось сохранить правило распределения прибыли.", "Failed to save the profit-sharing rule.")
 }
 
 function compressRuleLevels(rules: ProfitShareRule[]): {
@@ -87,6 +117,7 @@ export default function ProfitShareRulesPage() {
   const [draggedRuleId, setDraggedRuleId] = useState<string | null>(null);
   const [dragOverLevel, setDragOverLevel] = useState<number | null>(null);
   const [movingRuleId, setMovingRuleId] = useState<string | null>(null);
+  const [prependBeforeFirst, setPrependBeforeFirst] = useState(false);
   const [isSavingSnapshot, setIsSavingSnapshot] = useState(false);
   const [isRepairingLevels, setIsRepairingLevels] = useState(false);
   const [notice, setNotice] = useState("");
@@ -154,7 +185,7 @@ export default function ProfitShareRulesPage() {
 
   useEffect(() => {
     if (ready) load();
-  }, [ready]);
+  }, [ready, id, token]);
 
   function getLevelSums(excludeRuleId?: string): Map<number, number> {
     const sums = new Map<number, number>();
@@ -238,17 +269,17 @@ export default function ProfitShareRulesPage() {
       setError(tr("Процент должен быть числом от 0 до 100.", "Percent must be a number from 0 to 100."));
       return;
     }
-    const level = Number(form.level);
-    if (form.level.trim() === "" || !Number.isInteger(level) || level < 1) {
+    const level = !form.id && prependBeforeFirst ? 1 : Number(form.level);
+    if ((!prependBeforeFirst || !!form.id) && (form.level.trim() === "" || !Number.isInteger(level) || level < 1)) {
       setError(tr("Уровень должен быть целым числом от 1.", "Level must be an integer starting from 1."));
       return;
     }
-    const levelValidation = validateLevelInput(level, form.id);
+    const levelValidation = !form.id && prependBeforeFirst ? { ok: true, message: "" } : validateLevelInput(level, form.id);
     if (!levelValidation.ok) {
       setError(levelValidation.message);
       return;
     }
-    const budgetValidation = validateLevelPercentBudget(level, percent, form.id);
+    const budgetValidation = !form.id && prependBeforeFirst ? { ok: true, message: "" } : validateLevelPercentBudget(level, percent, form.id);
     if (!budgetValidation.ok) {
       setError(budgetValidation.message);
       return;
@@ -260,7 +291,8 @@ export default function ProfitShareRulesPage() {
       responsibility: form.responsibility,
       percent,
       level,
-      applies_after_mandatory: level > 1
+      applies_after_mandatory: level > 1,
+      prepend_before_first: !form.id && prependBeforeFirst
     };
     try {
       if (form.id) {
@@ -269,9 +301,10 @@ export default function ProfitShareRulesPage() {
         await apiRequest(`/projects/${id}/profit-share-rules`, { method: "POST", token, body });
       }
       setForm(initialForm);
+      setPrependBeforeFirst(false);
       await load();
     } catch (err) {
-      setError((err as Error).message);
+      setError(normalizeProfitShareRuleError(err, locale));
     }
   }
 
@@ -284,6 +317,7 @@ export default function ProfitShareRulesPage() {
       level: String(rule.level || 1),
       percent: String(rule.percent)
     });
+    setPrependBeforeFirst(false);
   }
 
   async function onDelete(ruleId: string) {
@@ -419,7 +453,12 @@ export default function ProfitShareRulesPage() {
   const fullLevel = levels.find((level) => (levelSums.get(level) || 0) >= 99.999999) || null;
   const nextDnDLevel = maxLevel + 1;
   const canCreateNextLevel = fullLevel === null && nextDnDLevel <= MAX_PROFIT_LEVEL;
-  const levelHint = Number.isInteger(Number(form.level)) ? validateLevelInput(Number(form.level), form.id).message : "";
+  const levelHint =
+    !form.id && prependBeforeFirst
+      ? ""
+      : Number.isInteger(Number(form.level))
+        ? validateLevelInput(Number(form.level), form.id).message
+        : "";
   const distributedAmount = preview ? preview.distributed_amount : 0;
   const distributedPercent = preview ? preview.distributed_percent : 0;
   const membersByID = new Map(members.map((member) => [member.user_id, member]));
@@ -591,7 +630,11 @@ export default function ProfitShareRulesPage() {
             <div className="level-picker">
               <label className="level-picker-label">{tr("Уровень распределения", "Distribution level")}</label>
               <div className="level-picker-row">
-                <select value={form.level} onChange={(e) => setForm({ ...form, level: e.target.value })} disabled={!canFinanceWrite}>
+                <select
+                  value={!form.id && prependBeforeFirst ? "1" : form.level}
+                  onChange={(e) => setForm({ ...form, level: e.target.value })}
+                  disabled={!canFinanceWrite || (!form.id && prependBeforeFirst)}
+                >
                   {Array.from({ length: MAX_PROFIT_LEVEL }, (_, index) => index + 1).map((level) => (
                     <option key={level} value={String(level)}>
                       {levelLabel(level, locale)}
@@ -606,6 +649,25 @@ export default function ProfitShareRulesPage() {
                 )}
               </p>
             </div>
+            {!form.id && (
+              <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={prependBeforeFirst}
+                  onChange={(e) => setPrependBeforeFirst(e.target.checked)}
+                  disabled={!canFinanceWrite}
+                />
+                <span>{tr("Вставить перед первым уровнем", "Insert before the first level")}</span>
+              </label>
+            )}
+            {!form.id && prependBeforeFirst && (
+              <p className="subtle" style={{ margin: 0 }}>
+                {tr(
+                  "Новое правило станет уровнем 1, а все существующие уровни автоматически сдвинутся на +1.",
+                  "The new rule becomes level 1 and all existing levels shift by +1 automatically."
+                )}
+              </p>
+            )}
             <input
               type="number"
               min="0"
@@ -627,7 +689,15 @@ export default function ProfitShareRulesPage() {
             <div style={{ display: "flex", gap: 8 }}>
               <button disabled={!canFinanceWrite}>{form.id ? tr("Обновить", "Update") : tr("Создать", "Create")}</button>
               {form.id && (
-                <button className="secondary" type="button" onClick={() => setForm(initialForm)} disabled={!canFinanceWrite}>
+                <button
+                  className="secondary"
+                  type="button"
+                  onClick={() => {
+                    setForm(initialForm);
+                    setPrependBeforeFirst(false);
+                  }}
+                  disabled={!canFinanceWrite}
+                >
                   {tr("Отмена", "Cancel")}
                 </button>
               )}

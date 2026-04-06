@@ -180,6 +180,26 @@ export default function ProfilePage() {
     }
   }
 
+  async function deleteAvatar() {
+    if (!token || !user || !user.avatar_path) return;
+    setError("");
+    setNotice("");
+    setSaving(true);
+    try {
+      const updated = await apiRequest<User>("/auth/avatar", {
+        method: "DELETE",
+        token
+      });
+      setUser(updated);
+      setAvatarFile(null);
+      setNotice(tr("Аватар удалён.", "Avatar removed."));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (!ready || !user) return null;
 
   return (
@@ -272,6 +292,11 @@ export default function ProfilePage() {
               <button type="submit" disabled={saving || !avatarFile}>
                 {tr("Загрузить аватар", "Upload avatar")}
               </button>
+              {user.avatar_path && (
+                <button type="button" className="secondary" disabled={saving} onClick={() => void deleteAvatar()}>
+                  {tr("Удалить аватар", "Remove avatar")}
+                </button>
+              )}
               {avatarFile && (
                 <button type="button" className="secondary" onClick={() => setAvatarFile(null)}>
                   {tr("Очистить", "Clear")}

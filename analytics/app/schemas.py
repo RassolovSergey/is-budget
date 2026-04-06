@@ -21,7 +21,7 @@ class HistoricalCampaignExpense(AnalyticsBaseModel):
 
 class HistoricalCampaignDay(AnalyticsBaseModel):
     day_number: int = Field(ge=1)
-    income_amount: float = Field(ge=0)
+    income_amount: float
     expenses: list[HistoricalCampaignExpense] = Field(default_factory=list)
 
 
@@ -58,7 +58,7 @@ class ForecastRequest(AnalyticsBaseModel):
     horizon_days: int = Field(ge=1, le=30)
     history: list[HistoryPoint]
     historical_campaigns: list[HistoricalCampaign] = Field(default_factory=list)
-    current_income_to_date: float = Field(default=0, ge=0)
+    current_income_to_date: float = 0
     current_ad_spend_to_date: float = Field(default=0, ge=0)
     model_version: str = "crowdfunding-hybrid-v2"
     seed: int = 42

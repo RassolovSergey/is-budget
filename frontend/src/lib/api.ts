@@ -2,6 +2,20 @@ import { clearToken } from "./session";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api";
 
+export class ApiError extends Error {
+  status: number;
+  code?: string;
+  details?: Record<string, string>;
+
+  constructor(message: string, status: number, code?: string, details?: Record<string, string>) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+    this.details = details;
+  }
+}
+
 type RequestOptions = {
   method?: string;
   token?: string;
@@ -30,13 +44,17 @@ export async function apiRequest<T>(path: string, opts: RequestOptions = {}): Pr
 
   if (!res.ok) {
     let msg = `Request failed (${res.status})`;
+    let code: string | undefined;
+    let details: Record<string, string> | undefined;
     try {
       const payload = await res.json();
       if (payload.error) msg = payload.error;
+      if (payload.code) code = payload.code;
+      if (payload.details) details = payload.details;
     } catch {
       // keep default message
     }
-    throw new Error(msg);
+    throw new ApiError(msg, res.status, code, details);
   }
 
   if (res.status === 204) return undefined as T;
@@ -63,13 +81,17 @@ export async function apiDownload(path: string, token?: string): Promise<Blob> {
 
   if (!res.ok) {
     let msg = `Request failed (${res.status})`;
+    let code: string | undefined;
+    let details: Record<string, string> | undefined;
     try {
       const payload = await res.json();
       if (payload.error) msg = payload.error;
+      if (payload.code) code = payload.code;
+      if (payload.details) details = payload.details;
     } catch {
       // keep default message
     }
-    throw new Error(msg);
+    throw new ApiError(msg, res.status, code, details);
   }
 
   return await res.blob();

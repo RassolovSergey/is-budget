@@ -4,6 +4,7 @@ import { Noto_Sans, Noto_Serif } from "next/font/google";
 import { ConfirmProvider } from "../components/ConfirmProvider";
 import { LocaleProvider } from "../components/LocaleProvider";
 import { ThemeProvider } from "../components/ThemeProvider";
+import { ToastProvider } from "../components/ToastProvider";
 
 import "./globals.css";
 
@@ -21,7 +22,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className={`${sans.variable} ${serif.variable}`}>
         <LocaleProvider>
           <ThemeProvider>
-            <ConfirmProvider>{children}</ConfirmProvider>
+            <ToastProvider>
+              <ConfirmProvider>{children}</ConfirmProvider>
+            </ToastProvider>
           </ThemeProvider>
         </LocaleProvider>
       </body>

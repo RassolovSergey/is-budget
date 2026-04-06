@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import type { Project, CurrencyCode, ProjectRole, ProjectStatus } from "../../lib/types";
+import type { Project, CurrencyCode, ProjectCategoryFolderSummary, ProjectRole, ProjectStatus } from "../../lib/types";
 import type { FolderRecord, FolderColor, FolderIcon, ProjectMenuState } from "./page-types";
 
 type Translator = (key: string) => string;
@@ -18,7 +18,6 @@ type ProjectsKanbanSectionProps = {
 type ProjectsFolderExplorerSectionProps = {
   tr: LocalTranslator;
   t: Translator;
-  projects: Project[];
   activeFolder: string;
   allFoldersKey: string;
   folderRecords: FolderRecord[];
@@ -35,6 +34,8 @@ type ProjectsFolderExplorerSectionProps = {
   colorToken: (color: FolderColor) => string;
   folderGlyph: (icon: FolderIcon) => string;
   folderLabel: (folderName: string) => string;
+  allFoldersSummary: ProjectCategoryFolderSummary;
+  folderSummaryFor: (folderName: string) => ProjectCategoryFolderSummary;
   folderNames: string[];
   onSelectFolder: (folderName: string) => void;
   onToggleComposer: () => void;
@@ -163,7 +164,6 @@ export function ProjectsKanbanSection({
 export function ProjectsFolderExplorerSection({
   tr,
   t,
-  projects,
   activeFolder,
   allFoldersKey,
   folderRecords,
@@ -180,6 +180,8 @@ export function ProjectsFolderExplorerSection({
   colorToken,
   folderGlyph,
   folderLabel,
+  allFoldersSummary,
+  folderSummaryFor,
   folderNames,
   onSelectFolder,
   onToggleComposer,
@@ -194,6 +196,19 @@ export function ProjectsFolderExplorerSection({
   onCreateFolder,
   projectStatusLabels
 }: ProjectsFolderExplorerSectionProps) {
+  function projectWord(count: number): string {
+    if (count % 10 === 1 && count % 100 !== 11) return "проект";
+    if (count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 10 || count % 100 >= 20)) return "проекта";
+    return "проектов";
+  }
+
+  function folderSummaryLabel(summary: ProjectCategoryFolderSummary): string {
+    return tr(
+      `${summary.active_projects_count} ${projectWord(summary.active_projects_count)} • завершённых ${summary.completed_projects_count} • исторических ${summary.historical_campaigns_count}`,
+      `${summary.active_projects_count} ${summary.active_projects_count === 1 ? "project" : "projects"} • completed ${summary.completed_projects_count} • historical ${summary.historical_campaigns_count}`
+    );
+  }
+
   return (
     <section className="card projects-folders-card projects-folder-explorer-card">
       <div className="section-head">
@@ -228,12 +243,12 @@ export function ProjectsFolderExplorerSection({
           <div className="folder-drive-icon shell-folder-icon shell-folder-icon-neutral">◧</div>
           <div className="folder-drive-body">
             <strong>{tr("Все папки", "All folders")}</strong>
-            <span>{projects.length} {t("projects.count").toLowerCase()}</span>
+            <span>{folderSummaryLabel(allFoldersSummary)}</span>
           </div>
         </button>
 
         {folderRecords.map((folder) => {
-          const count = projects.filter((project) => folderLabel(project.category) === folderLabel(folder.name)).length;
+          const summary = folderSummaryFor(folder.name);
           return (
             <button
               key={folder.id}
@@ -249,7 +264,7 @@ export function ProjectsFolderExplorerSection({
               <div className="folder-drive-icon">{folderGlyph(folder.icon)}</div>
               <div className="folder-drive-body">
                 <strong>{folderLabel(folder.name)}</strong>
-                <span>{count} {t("projects.count").toLowerCase()}</span>
+                <span>{folderSummaryLabel(summary)}</span>
               </div>
             </button>
           );

@@ -7,8 +7,10 @@ import { AppShell } from "../../../../components/AppShell";
 import { useConfirm } from "../../../../components/ConfirmProvider";
 import { useLocale } from "../../../../components/LocaleProvider";
 import { ProjectNav } from "../../../../components/ProjectNav";
+import { useToast } from "../../../../components/ToastProvider";
 import { apiRequest } from "../../../../lib/api";
 import { parseMemberLookup } from "../../../../lib/memberLookup";
+import { normalizeProjectInviteError } from "../../../../lib/projectInviteErrors";
 import { projectRoleOptions, projectRoleView } from "../../../../lib/projectRoles";
 import type { Project, ProjectInviteView, ProjectMemberWithUser, ProjectRole, User } from "../../../../lib/types";
 import { useAuthGuard } from "../../../../lib/useAuthGuard";
@@ -17,6 +19,7 @@ export default function ProjectMembersPage() {
   const { id } = useParams<{ id: string }>();
   const confirmAction = useConfirm();
   const { t, locale } = useLocale();
+  const { showToast } = useToast();
   const { token, ready } = useAuthGuard();
 
   const [project, setProject] = useState<Project | null>(null);
@@ -93,7 +96,11 @@ export default function ProjectMembersPage() {
       setNotice(tr("Приглашение отправлено. Участник появится после подтверждения.", "Invite sent. Member will appear after confirmation."));
       await load();
     } catch (err) {
-      setError((err as Error).message);
+      const inviteError = normalizeProjectInviteError(err, locale);
+      if (inviteError.toastMessage) {
+        showToast({ message: inviteError.toastMessage, tone: "warning" });
+      }
+      setError(inviteError.suppressInline ? "" : inviteError.inlineMessage);
     }
   }
 
@@ -196,8 +203,8 @@ export default function ProjectMembersPage() {
             </label>
             <div className="members-add-actions">
               <button type="button" className="fixed-width-button" onClick={addMember}>{tr("Добавить", "Add")}</button>
-              <p className="subtle">{selectedMemberRoleView.subtitle}</p>
             </div>
+            <p className="subtle members-add-role-helper">{selectedMemberRoleView.subtitle}</p>
           </div>
         ) : (
           <p className="subtle" style={{ marginTop: 0 }}>

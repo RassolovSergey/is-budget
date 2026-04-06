@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 
 import { useLocale } from "./LocaleProvider";
 import { apiRequest } from "../lib/api";
+import { dispatchInvitesUpdated, dispatchProjectsUpdated, INVITES_UPDATED_EVENT } from "../lib/appEvents";
 import { toIntlLocale } from "../lib/i18n";
 import { projectRoleView } from "../lib/projectRoles";
 import { getToken } from "../lib/session";
@@ -61,7 +62,8 @@ export function NotificationsBell() {
     try {
       await apiRequest(`/project-invites/${inviteToken}/accept`, { method: "POST", token });
       await loadInvites();
-      window.dispatchEvent(new CustomEvent("invites-updated"));
+      dispatchInvitesUpdated();
+      dispatchProjectsUpdated();
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -77,7 +79,7 @@ export function NotificationsBell() {
     try {
       await apiRequest(`/project-invites/${inviteToken}/decline`, { method: "POST", token });
       await loadInvites();
-      window.dispatchEvent(new CustomEvent("invites-updated"));
+      dispatchInvitesUpdated();
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -93,8 +95,8 @@ export function NotificationsBell() {
     const onUpdated = () => {
       loadInvites();
     };
-    window.addEventListener("invites-updated", onUpdated);
-    return () => window.removeEventListener("invites-updated", onUpdated);
+    window.addEventListener(INVITES_UPDATED_EVENT, onUpdated);
+    return () => window.removeEventListener(INVITES_UPDATED_EVENT, onUpdated);
   }, []);
 
   useEffect(() => {

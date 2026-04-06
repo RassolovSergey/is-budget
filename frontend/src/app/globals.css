@@ -1012,14 +1012,32 @@ nav.tabs a.active {
 
 .dashboard-team-toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(220px, auto) auto;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 240px) 148px;
+  grid-template-areas:
+    "lookup role action"
+    ". helper .";
+  column-gap: 12px;
+  row-gap: 10px;
   margin-bottom: 8px;
 }
 
-.dashboard-role-picker {
-  display: grid;
-  gap: 4px;
+.dashboard-team-lookup {
+  grid-area: lookup;
+}
+
+.dashboard-team-role-select {
+  grid-area: role;
+}
+
+.dashboard-team-add-button {
+  grid-area: action;
+}
+
+.dashboard-role-helper {
+  grid-area: helper;
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.4;
 }
 
 .dashboard-kpi-grid {
@@ -2483,6 +2501,33 @@ nav.tabs a.active {
   letter-spacing: -0.02em;
 }
 
+.my-income-forecast-block {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--button-bg) 3%, #fff), var(--surface));
+}
+
+.my-income-forecast-head {
+  display: grid;
+  gap: 8px;
+}
+
+.my-income-forecast-head h2 {
+  margin: 0;
+  font-size: clamp(1.7rem, 1.22rem + 0.9vw, 2.35rem);
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.my-income-forecast-range {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .my-income-breakdown-list {
   display: grid;
   gap: 10px;
@@ -3153,8 +3198,13 @@ nav.tabs a.active {
 
 .members-add-card {
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) 220px minmax(240px, 0.75fr);
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 240px) 148px;
+  grid-template-areas:
+    "lookup role actions"
+    "helper helper helper";
+  align-items: end;
+  column-gap: 12px;
+  row-gap: 10px;
   padding: 14px;
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -3166,14 +3216,37 @@ nav.tabs a.active {
   gap: 6px;
 }
 
-.members-add-actions {
-  display: grid;
-  align-content: end;
-  gap: 6px;
+.members-add-lookup {
+  grid-area: lookup;
 }
 
-.members-add-actions p {
+.members-add-role {
+  grid-area: role;
+}
+
+.members-add-lookup input,
+.members-add-role select,
+.members-add-actions > button {
+  height: 48px;
+  min-height: 48px;
+}
+
+.members-add-actions {
+  grid-area: actions;
+  display: flex;
+  align-items: flex-end;
+  justify-content: stretch;
+  height: 100%;
+}
+
+.members-add-actions > button {
+  width: 100%;
+}
+
+.members-add-role-helper {
+  grid-area: helper;
   margin: 0;
+  line-height: 1.4;
 }
 
 .member-cards-grid {
@@ -3827,6 +3900,18 @@ nav.tabs a.active {
 
   .project-folder-form-row {
     grid-template-columns: 1fr;
+  }
+
+  .members-add-card {
+    grid-template-areas:
+      "lookup"
+      "role"
+      "actions"
+      "helper";
+  }
+
+  .members-add-actions {
+    height: auto;
   }
 }
 
@@ -4759,10 +4844,17 @@ nav.tabs a.active {
   align-items: end;
 }
 
+.dashboard-team-lookup,
+.dashboard-team-role-select,
 .dashboard-team-toolbar > .fixed-width-button,
 .dashboard-team-toolbar > button {
+  height: 48px;
   min-height: 48px;
-  align-self: end;
+  align-self: stretch;
+}
+
+.dashboard-team-add-button {
+  width: 100%;
 }
 
 .dashboard-kpi-grid {
@@ -4880,6 +4972,12 @@ nav.tabs a.active {
 
 @media (max-width: 900px) {
   .dashboard-team-toolbar {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "lookup"
+      "role"
+      "helper"
+      "action";
     align-items: stretch;
   }
 
@@ -5266,6 +5364,10 @@ nav.tabs a.active {
   .profile-security-grid,
   .tax-rules-top-grid,
   .profit-share-top-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .my-income-forecast-range {
     grid-template-columns: 1fr;
   }
 
@@ -5866,4 +5968,92 @@ nav.tabs a.active {
     inset 0 0 0 2px rgba(255, 255, 255, 0.14),
     0 0 0 4px color-mix(in srgb, var(--folder-accent) 18%, transparent),
     0 8px 18px rgba(0, 0, 0, 0.22);
+}
+
+.toast-viewport {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+  max-width: min(360px, calc(100vw - 24px));
+}
+
+.toast-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  background: rgba(255, 252, 246, 0.96);
+  box-shadow: 0 18px 42px rgba(24, 49, 83, 0.18);
+  backdrop-filter: blur(14px);
+  pointer-events: auto;
+}
+
+.toast-card p {
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.45;
+}
+
+.toast-warning {
+  border-color: rgba(214, 104, 83, 0.28);
+}
+
+.toast-error {
+  border-color: rgba(188, 71, 73, 0.32);
+}
+
+.toast-success {
+  border-color: rgba(42, 157, 143, 0.26);
+}
+
+.toast-close {
+  min-width: 28px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(24, 49, 83, 0.08);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.toast-close:hover {
+  background: rgba(24, 49, 83, 0.14);
+  color: var(--ink);
+}
+
+.theme-dark .toast-card {
+  background: rgba(16, 22, 35, 0.94);
+  border-color: rgba(136, 164, 206, 0.2);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.36);
+}
+
+.theme-dark .toast-close {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.74);
+}
+
+.theme-dark .toast-close:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+@media (max-width: 720px) {
+  .toast-viewport {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    max-width: none;
+  }
 }

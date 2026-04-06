@@ -37,6 +37,7 @@ export default function TaxRulesPage() {
   const [draggedRuleId, setDraggedRuleId] = useState<string | null>(null);
   const [dragOverLevel, setDragOverLevel] = useState<number | null>(null);
   const [movingRuleId, setMovingRuleId] = useState<string | null>(null);
+  const [prependBeforeFirst, setPrependBeforeFirst] = useState(false);
   const [error, setError] = useState("");
 
   async function load() {
@@ -57,7 +58,7 @@ export default function TaxRulesPage() {
 
   useEffect(() => {
     if (ready) load();
-  }, [ready]);
+  }, [ready, id, token]);
 
   const tr = (ru: string, en: string) => (locale === "en" ? en : ru);
 
@@ -73,12 +74,12 @@ export default function TaxRulesPage() {
       setError(tr("Процент должен быть числом от 0 до 100.", "Percent must be a number from 0 to 100."));
       return;
     }
-    const level = Number(form.level);
-    if (form.level.trim() === "" || !Number.isInteger(level) || level < 1) {
+    const level = !form.id && prependBeforeFirst ? 1 : Number(form.level);
+    if ((!prependBeforeFirst || !!form.id) && (form.level.trim() === "" || !Number.isInteger(level) || level < 1)) {
       setError(tr("Уровень должен быть целым числом от 1.", "Level must be an integer starting from 1."));
       return;
     }
-    const levelValidation = validateLevelInput(level, form.id);
+    const levelValidation = !form.id && prependBeforeFirst ? { ok: true, message: "" } : validateLevelInput(level, form.id);
     if (!levelValidation.ok) {
       setError(levelValidation.message);
       return;
@@ -87,7 +88,8 @@ export default function TaxRulesPage() {
     const body = {
       name: form.name,
       percent,
-      level
+      level,
+      prepend_before_first: !form.id && prependBeforeFirst
     };
 
     try {
@@ -97,6 +99,7 @@ export default function TaxRulesPage() {
         await apiRequest(`/projects/${id}/tax-rules`, { method: "POST", token, body });
       }
       setForm(initialForm);
+      setPrependBeforeFirst(false);
       await load();
     } catch (err) {
       setError((err as Error).message);
@@ -110,6 +113,7 @@ export default function TaxRulesPage() {
       percent: String(rule.percent),
       level: String(rule.level)
     });
+    setPrependBeforeFirst(false);
   }
 
   async function onDelete(ruleId: string) {
@@ -201,7 +205,12 @@ export default function TaxRulesPage() {
   }
   const levels = Array.from(levelsMap.keys()).sort((a, b) => a - b);
   const maxLevel = levels.length ? levels[levels.length - 1] : 0;
-  const levelHint = Number.isInteger(Number(form.level)) ? validateLevelInput(Number(form.level), form.id).message : "";
+  const levelHint =
+    !form.id && prependBeforeFirst
+      ? ""
+      : Number.isInteger(Number(form.level))
+        ? validateLevelInput(Number(form.level), form.id).message
+        : "";
   const previewLevelMap = new Map((preview?.tax_levels || []).map((item) => [item.level, item]));
 
   return (
@@ -256,13 +265,32 @@ export default function TaxRulesPage() {
                   min="1"
                   step="1"
                   placeholder={tr("Уровень (1, 2, 3...)", "Level (1, 2, 3...)")}
-                  value={form.level}
+                  value={!form.id && prependBeforeFirst ? "1" : form.level}
                   onChange={(e) => setForm({ ...form, level: e.target.value })}
-                  disabled={!canFinanceWrite}
+                  disabled={!canFinanceWrite || (!form.id && prependBeforeFirst)}
                   required
                 />
               </label>
             </div>
+            {!form.id && (
+              <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={prependBeforeFirst}
+                  onChange={(e) => setPrependBeforeFirst(e.target.checked)}
+                  disabled={!canFinanceWrite}
+                />
+                <span>{tr("Вставить перед первым уровнем", "Insert before the first level")}</span>
+              </label>
+            )}
+            {!form.id && prependBeforeFirst && (
+              <p className="subtle" style={{ margin: 0 }}>
+                {tr(
+                  "Новый налог станет уровнем 1, а все существующие уровни автоматически сдвинутся на +1.",
+                  "The new tax rule becomes level 1 and all existing levels shift by +1 automatically."
+                )}
+              </p>
+            )}
             {levelHint && <p style={{ color: "#bc4749", margin: 0 }}>{levelHint}</p>}
             <p className="subtle" style={{ margin: 0 }}>
               {tr(
@@ -273,7 +301,15 @@ export default function TaxRulesPage() {
             <div style={{ display: "flex", gap: 8 }}>
               <button disabled={!canFinanceWrite}>{form.id ? tr("Обновить", "Update") : tr("Создать", "Create")}</button>
               {form.id && (
-                <button className="secondary" type="button" onClick={() => setForm(initialForm)} disabled={!canFinanceWrite}>
+                <button
+                  className="secondary"
+                  type="button"
+                  onClick={() => {
+                    setForm(initialForm);
+                    setPrependBeforeFirst(false);
+                  }}
+                  disabled={!canFinanceWrite}
+                >
                   {tr("Отмена", "Cancel")}
                 </button>
               )}

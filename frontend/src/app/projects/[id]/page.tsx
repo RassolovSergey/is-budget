@@ -8,10 +8,12 @@ import { AppShell } from "../../../components/AppShell";
 import { useConfirm } from "../../../components/ConfirmProvider";
 import { useLocale } from "../../../components/LocaleProvider";
 import { ProjectNav } from "../../../components/ProjectNav";
+import { useToast } from "../../../components/ToastProvider";
 import { apiRequest } from "../../../lib/api";
 import { toIntlLocale } from "../../../lib/i18n";
 import { parseMemberLookup } from "../../../lib/memberLookup";
 import { money, shortDate } from "../../../lib/format";
+import { normalizeProjectInviteError } from "../../../lib/projectInviteErrors";
 import { projectRoleOptions, projectRoleView } from "../../../lib/projectRoles";
 import type { DashboardResponse, ForecastRun, Project, ProjectMemberWithUser, ProjectStatus, User } from "../../../lib/types";
 import { useAuthGuard } from "../../../lib/useAuthGuard";
@@ -20,7 +22,7 @@ function completionDate(project: Project, locale: string): string | null {
   if (!project.activated_at) return null;
   const start = new Date(project.activated_at);
   if (Number.isNaN(start.getTime())) return null;
-  start.setDate(start.getDate() + project.duration_days);
+  start.setDate(start.getDate() + project.duration_days - 1);
   return start.toLocaleDateString(locale);
 }
 
@@ -82,8 +84,7 @@ function buildCumulativeIncome(
 
   if (project.activated_at) {
     firstDate = toIsoDate(project.activated_at);
-    // We intentionally include the auto-completion date as campaign boundary.
-    lastDate = addDays(firstDate, project.duration_days);
+    lastDate = addDays(firstDate, project.duration_days - 1);
   }
 
   if (lastDate < firstDate) {
@@ -255,6 +256,7 @@ export default function DashboardPage() {
   const { id } = useParams<{ id: string }>();
   const confirmAction = useConfirm();
   const { t, locale } = useLocale();
+  const { showToast } = useToast();
   const { token, ready } = useAuthGuard();
   const [project, setProject] = useState<Project | null>(null);
   const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
@@ -306,7 +308,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (ready) loadData();
-  }, [ready]);
+  }, [ready, id, token]);
 
   async function activateProject() {
     if (!token) return;
@@ -352,7 +354,11 @@ export default function DashboardPage() {
       setNotice(tr("Приглашение отправлено. Участник появится после подтверждения.", "Invite sent. Member will appear after confirmation."));
       await loadData();
     } catch (err) {
-      setError((err as Error).message);
+      const inviteError = normalizeProjectInviteError(err, locale);
+      if (inviteError.toastMessage) {
+        showToast({ message: inviteError.toastMessage, tone: "warning" });
+      }
+      setError(inviteError.suppressInline ? "" : inviteError.inlineMessage);
     }
   }
 
@@ -458,21 +464,24 @@ export default function DashboardPage() {
           <>
             <div className="dashboard-team-toolbar">
               <input
+                className="dashboard-team-lookup"
                 placeholder={tr("Email, user ID (UUID) или никнейм (@nickname)", "Email, user ID (UUID), or nickname (@nickname)")}
                 value={memberLookup}
                 onChange={(e) => setMemberLookup(e.target.value)}
               />
-              <div className="dashboard-role-picker">
-                <select value={memberRole} onChange={(e) => setMemberRole(e.target.value as typeof memberRole)}>
-                  {roleOptions.map((opt) => (
-                    <option key={opt.code} value={opt.code}>{opt.title}</option>
-                  ))}
-                </select>
-                <div className="subtle" style={{ marginTop: 4, fontSize: "0.85rem" }}>
-                  {selectedRoleView.subtitle}
-                </div>
+              <select
+                className="dashboard-team-role-select"
+                value={memberRole}
+                onChange={(e) => setMemberRole(e.target.value as typeof memberRole)}
+              >
+                {roleOptions.map((opt) => (
+                  <option key={opt.code} value={opt.code}>{opt.title}</option>
+                ))}
+              </select>
+              <button type="button" className="fixed-width-button dashboard-team-add-button" onClick={addMember}>{t("dashboard.team.add")}</button>
+              <div className="subtle dashboard-role-helper">
+                {selectedRoleView.subtitle}
               </div>
-              <button type="button" className="fixed-width-button" onClick={addMember}>{t("dashboard.team.add")}</button>
             </div>
             <div className="table-surface">
             <table>

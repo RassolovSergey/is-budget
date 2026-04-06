@@ -58,7 +58,7 @@ export function ForecastCommandSection({
             <strong>{formatMoney(currentIncomeTotal, currencyCode, locale)}</strong>
           </article>
           <article className="forecast-command-stat">
-            <span>{tr("Заполнено дней", "Observed days")}</span>
+            <span>{tr("Прошло дней кампании", "Campaign days elapsed")}</span>
             <strong>{observedDaysCount}</strong>
           </article>
           <article className="forecast-command-stat">
@@ -128,7 +128,7 @@ export function ForecastSetupSection({
         </div>
         <form style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }} onSubmit={onRunForecast}>
           <p className="subtle" style={{ margin: 0 }}>
-            {tr("Заполнено дней", "Observed days")}: <b>{observedDaysCount}</b> · {tr("Осталось дней", "Remaining days")}: <b>{remainingDays}</b> · {tr("Модель", "Model")}: <b>{tr("Гибридная краудфандинг-модель", "Hybrid crowdfunding model")}</b>
+            {tr("Прошло дней кампании", "Campaign days elapsed")}: <b>{observedDaysCount}</b> · {tr("Осталось дней", "Remaining days")}: <b>{remainingDays}</b> · {tr("Модель", "Model")}: <b>{tr("Гибридная краудфандинг-модель", "Hybrid crowdfunding model")}</b>
           </p>
           <button disabled={loading || !canForecastWrite || remainingDays <= 0}>
             {!canForecastWrite

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
 import { apiRequest } from "../../../lib/api";
+import { dispatchInvitesUpdated, dispatchProjectsUpdated } from "../../../lib/appEvents";
 import { useAuthGuard } from "../../../lib/useAuthGuard";
 
 export default function AcceptInvitePage() {
@@ -25,6 +26,8 @@ export default function AcceptInvitePage() {
         });
         if (canceled) return;
         setDone(true);
+        dispatchInvitesUpdated();
+        dispatchProjectsUpdated();
         router.replace(`/projects/${result.project_id}`);
       } catch (err) {
         if (canceled) return;

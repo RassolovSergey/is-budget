@@ -78,6 +78,15 @@ type ActualIncomeDaily struct {
 	UpdatedAt  time.Time `db:"updated_at" json:"updated_at"`
 }
 
+type ContributionLedger struct {
+	ID        uuid.UUID `db:"id" json:"id"`
+	ProjectID uuid.UUID `db:"project_id" json:"project_id"`
+	NodeID    uuid.UUID `db:"node_id" json:"node_id"`
+	UserID    uuid.UUID `db:"user_id" json:"user_id"`
+	Points    int32     `db:"points" json:"points"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+}
+
 type CurrencyRate struct {
 	FromCurrencyCode string    `db:"from_currency_code" json:"from_currency_code"`
 	ToCurrencyCode   string    `db:"to_currency_code" json:"to_currency_code"`
@@ -237,4 +246,25 @@ type User struct {
 	LastName            string    `db:"last_name" json:"last_name"`
 	Nickname            string    `db:"nickname" json:"nickname"`
 	AvatarPath          *string   `db:"avatar_path" json:"avatar_path"`
+}
+
+type WorkflowDependency struct {
+	ID           uuid.UUID `db:"id" json:"id"`
+	ParentNodeID uuid.UUID `db:"parent_node_id" json:"parent_node_id"`
+	ChildNodeID  uuid.UUID `db:"child_node_id" json:"child_node_id"`
+	CreatedAt    time.Time `db:"created_at" json:"created_at"`
+}
+
+type WorkflowNode struct {
+	ID                 uuid.UUID  `db:"id" json:"id"`
+	ProjectID          uuid.UUID  `db:"project_id" json:"project_id"`
+	Title              string     `db:"title" json:"title"`
+	Description        string     `db:"description" json:"description"`
+	Status             string     `db:"status" json:"status"`
+	AssigneeUserID     *uuid.UUID `db:"assignee_user_id" json:"assignee_user_id"`
+	ContributionPoints int32      `db:"contribution_points" json:"contribution_points"`
+	CompletedAt        *time.Time `db:"completed_at" json:"completed_at"`
+	CompletedBy        *uuid.UUID `db:"completed_by" json:"completed_by"`
+	CreatedAt          time.Time  `db:"created_at" json:"created_at"`
+	UpdatedAt          time.Time  `db:"updated_at" json:"updated_at"`
 }

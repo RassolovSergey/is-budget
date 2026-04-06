@@ -44,7 +44,7 @@ def campaign_day_income(campaign: HistoricalCampaign) -> np.ndarray:
     for day in campaign.days:
         day_idx = int(day.day_number) - 1
         if 0 <= day_idx < duration:
-            arr[day_idx] = max(float(day.income_amount), 0.0)
+            arr[day_idx] = float(day.income_amount)
 
     if len(arr) >= 2:
         diffs = np.diff(arr)

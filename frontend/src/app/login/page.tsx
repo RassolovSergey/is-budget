@@ -67,6 +67,17 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const tr = (ru: string, en: string) => (locale === "en" ? en : ru);
 
+  function resolveNextPath(): string {
+    if (typeof window === "undefined") {
+      return "/projects";
+    }
+    const next = new URLSearchParams(window.location.search).get("next");
+    if (!next || !next.startsWith("/") || next.startsWith("//")) {
+      return "/projects";
+    }
+    return next;
+  }
+
   async function submitLogin(e: FormEvent) {
     e.preventDefault();
     setError("");
@@ -77,7 +88,7 @@ export default function LoginPage() {
         body: { email, password }
       });
       setToken(result.token);
-      router.push("/projects");
+      router.push(resolveNextPath());
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -101,7 +112,7 @@ export default function LoginPage() {
         }
       });
       setToken(result.token);
-      router.push("/projects");
+      router.push(resolveNextPath());
     } catch (err) {
       setError((err as Error).message);
     } finally {

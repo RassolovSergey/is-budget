@@ -22,6 +22,7 @@ import (
 	"isbudget/backend/internal/forecast"
 	"isbudget/backend/internal/fx"
 	"isbudget/backend/internal/projects"
+	"isbudget/backend/internal/workflow"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -70,6 +71,10 @@ func main() {
 
 	projectsSvc := projects.NewService(q, pool)
 	projectsHandler := projects.NewHandler(projectsSvc)
+
+	workflowRepo := workflow.NewPGRepository(q, pool)
+	workflowSvc := workflow.NewService(workflowRepo)
+	workflowHandler := workflow.NewHandler(workflowSvc)
 
 	plannedSvc := planned_expenses.NewService(q)
 	plannedHandler := planned_expenses.NewHandler(plannedSvc)
@@ -189,6 +194,11 @@ func main() {
 			private.With(auth.RequireProjectPermission(q, auth.PermFinanceRead)).Get("/projects/{projectId}/payout-snapshots/{fileName}", payoutHandler.DownloadSnapshot)
 
 			private.With(auth.RequireProjectPermission(q, auth.PermDashboardRead)).Get("/projects/{projectId}/dashboard", dashboardHandler.Get)
+
+			private.Post("/workflow/node", workflowHandler.CreateNode)
+			private.Post("/workflow/node/{id}/assign", workflowHandler.AssignUser)
+			private.Post("/workflow/node/{id}/complete", workflowHandler.CompleteNode)
+			private.Get("/workflow/project/{id}", workflowHandler.GetProject)
 
 			private.With(auth.RequireProjectPermission(q, auth.PermForecastWrite)).Post("/projects/{projectId}/forecast", forecastHandler.Run)
 			private.With(auth.RequireProjectPermission(q, auth.PermForecastRead)).Get("/projects/{projectId}/forecast/runs", forecastHandler.ListRuns)

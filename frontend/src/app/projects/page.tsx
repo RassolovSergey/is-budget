@@ -6,8 +6,9 @@ import { AppShell } from "../../components/AppShell";
 import { useConfirm } from "../../components/ConfirmProvider";
 import { useLocale } from "../../components/LocaleProvider";
 import { apiRequest } from "../../lib/api";
+import { PROJECTS_UPDATED_EVENT } from "../../lib/appEvents";
 import { useAuthGuard } from "../../lib/useAuthGuard";
-import type { CurrencyCode, Project, ProjectRole, ProjectStatus } from "../../lib/types";
+import type { CurrencyCode, Project, ProjectCategoryFolderSummary, ProjectRole, ProjectStatus } from "../../lib/types";
 import {
   ProjectContextMenu,
   ProjectFormSection,
@@ -142,6 +143,7 @@ export default function ProjectsPage() {
   const { token, ready } = useAuthGuard();
 
   const [projects, setProjects] = useState<Project[]>([]);
+  const [folderSummaries, setFolderSummaries] = useState<ProjectCategoryFolderSummary[]>([]);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editingOriginalStatus, setEditingOriginalStatus] = useState<ProjectStatus | null>(null);
   const [name, setName] = useState("");
@@ -169,8 +171,12 @@ export default function ProjectsPage() {
   async function loadProjects() {
     if (!token) return;
     try {
-      const items = await apiRequest<Project[]>("/projects", { token });
+      const [items, summaries] = await Promise.all([
+        apiRequest<Project[]>("/projects", { token }),
+        apiRequest<ProjectCategoryFolderSummary[]>("/projects/category-folders", { token })
+      ]);
       setProjects(items);
+      setFolderSummaries(summaries);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -180,7 +186,17 @@ export default function ProjectsPage() {
     if (ready) {
       void loadProjects();
     }
-  }, [ready]);
+  }, [ready, token]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleProjectsUpdated = () => {
+      if (!ready || !token) return;
+      void loadProjects();
+    };
+    window.addEventListener(PROJECTS_UPDATED_EVENT, handleProjectsUpdated);
+    return () => window.removeEventListener(PROJECTS_UPDATED_EVENT, handleProjectsUpdated);
+  }, [ready, token]);
 
   useEffect(() => {
     setCustomFolders(loadStoredFolders(locale));
@@ -214,6 +230,15 @@ export default function ProjectsPage() {
     CUSTOMER: t("role.customer")
   };
 
+  const folderSummaryMap = useMemo(() => {
+    const map = new Map<string, ProjectCategoryFolderSummary>();
+    for (const item of folderSummaries) {
+      const normalized = canonicalFolderName(item.category);
+      map.set(normalized, { ...item, category: normalized });
+    }
+    return map;
+  }, [folderSummaries]);
+
   const folderMap = useMemo(() => {
     const map = new Map<string, FolderRecord>();
     for (const folder of customFolders) {
@@ -225,15 +250,28 @@ export default function ProjectsPage() {
         map.set(folderName, fallbackFolderRecord(folderName));
       }
     }
+    if ((projects.some((project) => canonicalFolderName(project.category) === DEFAULT_FOLDER) || folderSummaryMap.has(DEFAULT_FOLDER)) && !map.has(DEFAULT_FOLDER)) {
+      map.set(DEFAULT_FOLDER, { id: "general", name: DEFAULT_FOLDER, color: "slate", icon: "folder" });
+    }
     return map;
-  }, [customFolders, projects]);
+  }, [customFolders, folderSummaryMap, projects]);
 
   const folderRecords = useMemo(
     () => Array.from(folderMap.values()).sort((a, b) => a.name.localeCompare(b.name, locale === "en" ? "en" : "ru")),
     [folderMap, locale]
   );
 
-  const folderNames = useMemo(() => [DEFAULT_FOLDER, ...folderRecords.map((folder) => folder.name)], [folderRecords]);
+  const folderNames = useMemo(() => Array.from(new Set([DEFAULT_FOLDER, ...folderRecords.map((folder) => folder.name)])), [folderRecords]);
+
+  const allFoldersSummary = useMemo<ProjectCategoryFolderSummary>(
+    () => ({
+      category: ALL_FOLDERS_KEY,
+      active_projects_count: projects.filter((project) => project.status !== "completed").length,
+      completed_projects_count: projects.filter((project) => project.status === "completed").length,
+      historical_campaigns_count: folderSummaries.reduce((sum, item) => sum + item.historical_campaigns_count, 0)
+    }),
+    [projects, folderSummaries]
+  );
 
   useEffect(() => {
     if (activeFolder !== ALL_FOLDERS_KEY && !folderNames.includes(activeFolder)) {
@@ -274,6 +312,16 @@ export default function ProjectsPage() {
       return { id: "general", name: DEFAULT_FOLDER, color: "slate", icon: "folder" };
     }
     return folderMap.get(normalized) || fallbackFolderRecord(normalized);
+  }
+
+  function folderSummaryFor(folderName: string): ProjectCategoryFolderSummary {
+    const normalized = canonicalFolderName(folderName);
+    return folderSummaryMap.get(normalized) || {
+      category: normalized,
+      active_projects_count: 0,
+      completed_projects_count: 0,
+      historical_campaigns_count: 0
+    };
   }
 
   async function upsertProject(e: FormEvent) {
@@ -520,7 +568,6 @@ export default function ProjectsPage() {
       <ProjectsFolderExplorerSection
         tr={tr}
         t={t}
-        projects={projects}
         activeFolder={activeFolder}
         allFoldersKey={ALL_FOLDERS_KEY}
         folderRecords={folderRecords}
@@ -537,6 +584,8 @@ export default function ProjectsPage() {
         colorToken={colorToken}
         folderGlyph={folderGlyph}
         folderLabel={(folderName) => folderLabel(canonicalFolderName(folderName))}
+        allFoldersSummary={allFoldersSummary}
+        folderSummaryFor={folderSummaryFor}
         folderNames={folderNames}
         onSelectFolder={setActiveFolder}
         onToggleComposer={() => setFolderComposerOpen((prev) => !prev)}

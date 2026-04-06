@@ -87,6 +87,7 @@ export default function MyIncomePage() {
     ];
     return rows.filter((row) => row.value > 0);
   }, [income, locale]);
+  const forecastProjection = income?.forecast_projection || null;
 
   if (!ready || !project || !income) return null;
 
@@ -284,6 +285,70 @@ export default function MyIncomePage() {
           </div>
         </section>
       )}
+
+      <section className="card my-income-panel">
+        <div className="my-income-forecast-block">
+          <div className="my-income-forecast-head">
+            <p className="shell-eyebrow">{tr("Мой доход по прогнозу", "My forecast income")}</p>
+            {forecastProjection ? (
+              <>
+                <h2>{money(forecastProjection.yhat.user_amount, income.user_currency_code)}</h2>
+                <p className="subtle" style={{ margin: 0 }}>
+                  {tr(
+                    "На основе последнего запуска прогноза и текущих правил налогов/распределения.",
+                    "Based on the latest forecast run and the current tax/profit-sharing rules."
+                  )}
+                </p>
+                <p className="subtle" style={{ margin: "4px 0 0" }}>
+                  {tr("Последний запуск", "Latest run")}: {new Date(forecastProjection.created_at).toLocaleDateString(numberLocale)}
+                </p>
+              </>
+            ) : (
+              <>
+                <h2>{tr("Прогноз пока не запущен", "No forecast yet")}</h2>
+                <p className="subtle" style={{ margin: 0 }}>
+                  {tr(
+                    "Запустите прогноз, чтобы увидеть ожидаемый доход.",
+                    "Run a forecast to see the expected income."
+                  )}
+                </p>
+              </>
+            )}
+          </div>
+
+          {forecastProjection ? (
+            <div className="my-income-forecast-range">
+              {[
+                {
+                  label: tr("Плохой вариант", "Low case"),
+                  value: forecastProjection.p10,
+                },
+                {
+                  label: tr("Средний вариант", "Expected case"),
+                  value: forecastProjection.yhat,
+                },
+                {
+                  label: tr("Хороший вариант", "Best case"),
+                  value: forecastProjection.p90,
+                }
+              ].map((scenario) => (
+                <article key={scenario.label} className="my-income-stat-card">
+                  <span>{scenario.label}</span>
+                  <strong>{money(scenario.value.user_amount, income.user_currency_code)}</strong>
+                  <p className="subtle" style={{ margin: 0 }}>
+                    {tr("В валюте проекта", "In project currency")}: {money(scenario.value.project_amount, income.project_currency_code)}
+                  </p>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="ledger-empty-state">
+              <strong>{tr("Нет данных прогноза", "No forecast data")}</strong>
+              <span>{tr("После запуска прогноза здесь появится ожидаемый персональный доход по сценариям p10 / yhat / p90.", "After running a forecast, your projected personal income for p10 / yhat / p90 scenarios will appear here.")}</span>
+            </div>
+          )}
+        </div>
+      </section>
     </AppShell>
   );
 }

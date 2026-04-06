@@ -43,6 +43,29 @@ function isoDateToUTC(isoLike: string): number {
   return Date.UTC(year, month - 1, day);
 }
 
+function diffDaysInclusive(fromIso: string, toIso: string): number {
+  const diffMs = isoDateToUTC(toIso) - isoDateToUTC(fromIso);
+  if (!Number.isFinite(diffMs)) return 0;
+  return Math.max(0, Math.floor(diffMs / 86_400_000) + 1);
+}
+
+function clampObservedThroughDate(
+  campaignStartISO: string,
+  campaignEndISO: string,
+  latestActualDateISO: string
+): string {
+  if (latestActualDateISO) {
+    if (latestActualDateISO < campaignStartISO) return campaignStartISO;
+    if (latestActualDateISO > campaignEndISO) return campaignEndISO;
+    return latestActualDateISO;
+  }
+
+  const today = todayISO();
+  if (today < campaignStartISO) return campaignStartISO;
+  if (today > campaignEndISO) return campaignEndISO;
+  return today;
+}
+
 function formatUTCDate(ts: number, locale: string): string {
   if (!Number.isFinite(ts) || ts <= 0) return "—";
   return new Date(ts).toLocaleDateString(locale);
@@ -238,7 +261,7 @@ export default function ForecastPage() {
     if (ready) {
       load();
     }
-  }, [ready]);
+  }, [ready, id, token]);
 
   async function runForecast(e: FormEvent) {
     e.preventDefault();
@@ -374,9 +397,23 @@ export default function ForecastPage() {
     () => Array.from(new Set(history.map((item) => toIsoDate(item.income_date)))).sort(),
     [history]
   );
-
-  const observedDaysCount = knownDatesSorted.length;
   const lastActualDateISO = knownDatesSorted[knownDatesSorted.length - 1] ?? "";
+
+  const observedThroughDateISO = useMemo(() => {
+    if (!project?.activated_at) {
+      return lastActualDateISO;
+    }
+    const campaignStartISO = toIsoDate(project.activated_at);
+    const campaignEndISO = addDays(campaignStartISO, project.duration_days - 1);
+    return clampObservedThroughDate(campaignStartISO, campaignEndISO, lastActualDateISO);
+  }, [lastActualDateISO, project]);
+
+  const observedDaysCount = useMemo(() => {
+    if (!project?.activated_at) {
+      return knownDatesSorted.length;
+    }
+    return Math.min(project.duration_days, diffDaysInclusive(toIsoDate(project.activated_at), observedThroughDateISO));
+  }, [knownDatesSorted.length, observedThroughDateISO, project]);
   const remainingDays = Math.max((project?.duration_days || 0) - observedDaysCount, 0);
 
   const currentIncomeTotal = useMemo(

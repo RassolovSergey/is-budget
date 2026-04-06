@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { AppShell } from "../../components/AppShell";
 import { useLocale } from "../../components/LocaleProvider";
 import { apiRequest } from "../../lib/api";
+import { dispatchInvitesUpdated, dispatchProjectsUpdated } from "../../lib/appEvents";
 import { toIntlLocale } from "../../lib/i18n";
 import { projectRoleView } from "../../lib/projectRoles";
 import type { IncomingProjectInvite } from "../../lib/types";
@@ -50,7 +51,8 @@ export default function NotificationsPage() {
       });
       setNotice(tr("Приглашение принято.", "Invite accepted."));
       await load();
-      window.dispatchEvent(new CustomEvent("invites-updated"));
+      dispatchInvitesUpdated();
+      dispatchProjectsUpdated();
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -70,7 +72,7 @@ export default function NotificationsPage() {
       });
       setNotice(tr("Приглашение отклонено.", "Invite declined."));
       await load();
-      window.dispatchEvent(new CustomEvent("invites-updated"));
+      dispatchInvitesUpdated();
     } catch (err) {
       setError((err as Error).message);
     } finally {

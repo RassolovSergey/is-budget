@@ -12,7 +12,7 @@ def prepare_history(history: list[HistoryPoint]) -> pd.Series:
 
     rows = sorted(history, key=lambda x: x.date)
     index = pd.DatetimeIndex([pd.Timestamp(point.date) for point in rows])
-    values = pd.Series([max(float(point.amount), 0.0) for point in rows], index=index, dtype="float64")
+    values = pd.Series([float(point.amount) for point in rows], index=index, dtype="float64")
 
     full_idx = pd.date_range(start=index.min(), end=index.max(), freq="D")
     return values.reindex(full_idx, fill_value=0.0)

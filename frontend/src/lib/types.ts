@@ -35,6 +35,13 @@ export interface Project {
   updated_at: string;
 }
 
+export interface ProjectCategoryFolderSummary {
+  category: string;
+  active_projects_count: number;
+  completed_projects_count: number;
+  historical_campaigns_count: number;
+}
+
 export interface PlannedExpense {
   id: UUID;
   project_id: UUID;
@@ -242,6 +249,25 @@ export interface MyIncomeResponse {
   total_user_amount: number;
   total_conversion_rate: number;
   matching_strategy: string;
+  forecast_projection?: {
+    run_id: UUID;
+    created_at: string;
+    p10: {
+      projected_income_total: number;
+      project_amount: number;
+      user_amount: number;
+    };
+    yhat: {
+      projected_income_total: number;
+      project_amount: number;
+      user_amount: number;
+    };
+    p90: {
+      projected_income_total: number;
+      project_amount: number;
+      user_amount: number;
+    };
+  } | null;
   items: MyIncomeItem[];
 }
 

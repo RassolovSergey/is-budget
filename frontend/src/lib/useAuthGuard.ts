@@ -13,6 +13,11 @@ export function useAuthGuard() {
   useEffect(() => {
     const t = getToken();
     if (!t) {
+      if (typeof window !== "undefined") {
+        const target = encodeURIComponent(window.location.pathname + window.location.search);
+        router.replace(`/login?next=${target}`);
+        return;
+      }
       router.replace("/login");
       return;
     }

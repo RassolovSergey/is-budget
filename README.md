@@ -42,7 +42,7 @@
 
 - Frontend: `http://localhost:3000`
 - Backend API: `http://localhost:8080/api`
-- Backend Swagger UI: `http://localhost:8080/swagger`
+- Backend API docs: `http://localhost:8080/swagger`
 - Backend OpenAPI: `http://localhost:8080/openapi.yaml`
 - Analytics API: `http://localhost:8000`
 - Analytics docs: `http://localhost:8000/docs`
@@ -126,16 +126,18 @@ AUTH_RATE_LIMIT_MAX=10
 
 ## Основная бизнес-логика
 
-1. Доход хранится по дням (`actual_income_daily`), поддерживается upsert по дате.
-2. Расходы:
+1. В БД доход хранится по дням как daily delta series (`actual_income_daily`), поддерживается upsert по дате.
+2. Основной экран доходов в UI принимает накопленный доход по дням кампании, а backend пересчитывает его в дневные дельты.
+3. Forecast и analytics работают на дневной истории; накопительные графики строятся как производное представление поверх daily series.
+4. Расходы:
 - плановые (`planned_expenses`) для обязательств и приоритетов;
 - фактические (`actual_expenses`) для реальных выплат.
-3. Налоги применяются последовательно по уровням:
+5. Налоги применяются последовательно по уровням:
 - уровень 1 считается от доступной базы,
 - уровень 2 считается от остатка после уровня 1,
 - и так далее.
-4. После налогов доступная сумма распределяется по правилам `profit_share_rules`.
-5. Если часть прибыли не распределена правилами, остаток в preview относится администратору проекта (PM).
+6. После налогов доступная сумма распределяется по правилам `profit_share_rules`.
+7. Если часть прибыли не распределена правилами, остаток в preview относится администратору проекта (PM).
 
 ## Статусы проекта
 
@@ -348,10 +350,15 @@ cd backend
 go test ./...
 ```
 
+Если в среде несколько Go runtime и важно избежать попытки автозагрузки toolchain, достаточно локального Go `>= 1.23`.
+Точный patch-level toolchain проект больше не требует.
+
 Frontend:
 
 ```bash
 cd frontend
+npm ci
+npm run typecheck
 npm run build
 ```
 
@@ -361,6 +368,10 @@ Frontend type checking:
 cd frontend
 npm run typecheck
 ```
+
+Важно: frontend `node_modules` не нужно переиспользовать между Windows и WSL.
+У Next.js здесь platform-specific `@next/swc` optional binaries, а npm создаёт разные bin-shim под разные ОС.
+Если переключились между Windows Node и WSL Node, удалите `node_modules` и `.next`, затем заново выполните `npm ci` в том же runtime, где будете запускать `typecheck` и `build`.
 
 Analytics:
 
@@ -406,7 +417,7 @@ Frontend сознательно развивается итеративно:
 
 - `backend/openapi.yaml` — актуальная OpenAPI-спецификация backend API;
 - `http://localhost:8080/openapi.yaml` — raw schema;
-- `http://localhost:8080/swagger` — Swagger UI.
+- `http://localhost:8080/swagger` — локальная offline API docs-страница, которую backend обслуживает без внешнего CDN.
 
 Спецификация описывает:
 - auth DTO и access-token flow;
@@ -414,6 +425,8 @@ Frontend сознательно развивается итеративно:
 - rate-limited branches для чувствительных auth/invite маршрутов;
 - forecast orchestration endpoints и PDF report download;
 - ключевые finance и historical campaign endpoints.
+
+Для демонстрации в закрытой сети важно, что `/swagger` и `openapi.yaml` доступны полностью локально.
 
 ## Ограничения проекта
 

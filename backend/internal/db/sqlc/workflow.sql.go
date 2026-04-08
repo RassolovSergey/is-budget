@@ -14,19 +14,21 @@ import (
 
 const assignWorkflowNodeUser = `-- name: AssignWorkflowNodeUser :one
 UPDATE workflow_nodes
-SET assignee_user_id = $2,
+SET assignee_user_id = $1,
+    status = $2,
     updated_at = NOW()
-WHERE id = $1
+WHERE id = $3
 RETURNING id, project_id, title, description, status, assignee_user_id, contribution_points, completed_at, completed_by, created_at, updated_at
 `
 
 type AssignWorkflowNodeUserParams struct {
-	ID             uuid.UUID  `db:"id" json:"id"`
 	AssigneeUserID *uuid.UUID `db:"assignee_user_id" json:"assignee_user_id"`
+	Status         string     `db:"status" json:"status"`
+	ID             uuid.UUID  `db:"id" json:"id"`
 }
 
 func (q *Queries) AssignWorkflowNodeUser(ctx context.Context, arg AssignWorkflowNodeUserParams) (WorkflowNode, error) {
-	row := q.db.QueryRow(ctx, assignWorkflowNodeUser, arg.ID, arg.AssigneeUserID)
+	row := q.db.QueryRow(ctx, assignWorkflowNodeUser, arg.AssigneeUserID, arg.Status, arg.ID)
 	var i WorkflowNode
 	err := row.Scan(
 		&i.ID,
@@ -46,7 +48,7 @@ func (q *Queries) AssignWorkflowNodeUser(ctx context.Context, arg AssignWorkflow
 
 const completeWorkflowNode = `-- name: CompleteWorkflowNode :one
 UPDATE workflow_nodes
-SET status = 'completed',
+SET status = 'done',
     completed_at = $2,
     completed_by = $3,
     updated_at = NOW()
@@ -181,6 +183,25 @@ func (q *Queries) CreateWorkflowNode(ctx context.Context, arg CreateWorkflowNode
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const deleteWorkflowDependency = `-- name: DeleteWorkflowDependency :execrows
+DELETE FROM workflow_dependencies
+WHERE parent_node_id = $1
+  AND child_node_id = $2
+`
+
+type DeleteWorkflowDependencyParams struct {
+	ParentNodeID uuid.UUID `db:"parent_node_id" json:"parent_node_id"`
+	ChildNodeID  uuid.UUID `db:"child_node_id" json:"child_node_id"`
+}
+
+func (q *Queries) DeleteWorkflowDependency(ctx context.Context, arg DeleteWorkflowDependencyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteWorkflowDependency, arg.ParentNodeID, arg.ChildNodeID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getWorkflowNodeByID = `-- name: GetWorkflowNodeByID :one
@@ -416,6 +437,60 @@ func (q *Queries) ListWorkflowNodesByProject(ctx context.Context, projectID uuid
 	return items, nil
 }
 
+const markWorkflowNodeInProgress = `-- name: MarkWorkflowNodeInProgress :one
+UPDATE workflow_nodes
+SET status = 'in_progress',
+    updated_at = NOW()
+WHERE id = $1
+RETURNING id, project_id, title, description, status, assignee_user_id, contribution_points, completed_at, completed_by, created_at, updated_at
+`
+
+func (q *Queries) MarkWorkflowNodeInProgress(ctx context.Context, id uuid.UUID) (WorkflowNode, error) {
+	row := q.db.QueryRow(ctx, markWorkflowNodeInProgress, id)
+	var i WorkflowNode
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.AssigneeUserID,
+		&i.ContributionPoints,
+		&i.CompletedAt,
+		&i.CompletedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markWorkflowNodePlanned = `-- name: MarkWorkflowNodePlanned :one
+UPDATE workflow_nodes
+SET status = 'planned',
+    updated_at = NOW()
+WHERE id = $1
+RETURNING id, project_id, title, description, status, assignee_user_id, contribution_points, completed_at, completed_by, created_at, updated_at
+`
+
+func (q *Queries) MarkWorkflowNodePlanned(ctx context.Context, id uuid.UUID) (WorkflowNode, error) {
+	row := q.db.QueryRow(ctx, markWorkflowNodePlanned, id)
+	var i WorkflowNode
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.AssigneeUserID,
+		&i.ContributionPoints,
+		&i.CompletedAt,
+		&i.CompletedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const markWorkflowNodeReady = `-- name: MarkWorkflowNodeReady :one
 UPDATE workflow_nodes
 SET status = 'ready',
@@ -441,4 +516,109 @@ func (q *Queries) MarkWorkflowNodeReady(ctx context.Context, id uuid.UUID) (Work
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const updateContributionLedgerPointsByNode = `-- name: UpdateContributionLedgerPointsByNode :exec
+UPDATE contribution_ledger
+SET points = $1
+WHERE node_id = $2
+`
+
+type UpdateContributionLedgerPointsByNodeParams struct {
+	Points int32     `db:"points" json:"points"`
+	NodeID uuid.UUID `db:"node_id" json:"node_id"`
+}
+
+func (q *Queries) UpdateContributionLedgerPointsByNode(ctx context.Context, arg UpdateContributionLedgerPointsByNodeParams) error {
+	_, err := q.db.Exec(ctx, updateContributionLedgerPointsByNode, arg.Points, arg.NodeID)
+	return err
+}
+
+const updateWorkflowNode = `-- name: UpdateWorkflowNode :one
+UPDATE workflow_nodes
+SET title = $1,
+    description = $2,
+    contribution_points = $3,
+    updated_at = NOW()
+WHERE id = $4
+RETURNING id, project_id, title, description, status, assignee_user_id, contribution_points, completed_at, completed_by, created_at, updated_at
+`
+
+type UpdateWorkflowNodeParams struct {
+	Title              string    `db:"title" json:"title"`
+	Description        string    `db:"description" json:"description"`
+	ContributionPoints int32     `db:"contribution_points" json:"contribution_points"`
+	ID                 uuid.UUID `db:"id" json:"id"`
+}
+
+func (q *Queries) UpdateWorkflowNode(ctx context.Context, arg UpdateWorkflowNodeParams) (WorkflowNode, error) {
+	row := q.db.QueryRow(ctx, updateWorkflowNode,
+		arg.Title,
+		arg.Description,
+		arg.ContributionPoints,
+		arg.ID,
+	)
+	var i WorkflowNode
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.AssigneeUserID,
+		&i.ContributionPoints,
+		&i.CompletedAt,
+		&i.CompletedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const workflowDependencyExists = `-- name: WorkflowDependencyExists :one
+SELECT EXISTS (
+  SELECT 1
+  FROM workflow_dependencies
+  WHERE parent_node_id = $1
+    AND child_node_id = $2
+)
+`
+
+type WorkflowDependencyExistsParams struct {
+	ParentNodeID uuid.UUID `db:"parent_node_id" json:"parent_node_id"`
+	ChildNodeID  uuid.UUID `db:"child_node_id" json:"child_node_id"`
+}
+
+func (q *Queries) WorkflowDependencyExists(ctx context.Context, arg WorkflowDependencyExistsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, workflowDependencyExists, arg.ParentNodeID, arg.ChildNodeID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const workflowPathExists = `-- name: WorkflowPathExists :one
+WITH RECURSIVE reachable(id) AS (
+  SELECT $1::uuid
+  UNION
+  SELECT d.child_node_id
+  FROM workflow_dependencies d
+  JOIN reachable r ON d.parent_node_id = r.id
+)
+SELECT EXISTS (
+  SELECT 1
+  FROM reachable
+  WHERE id = $2
+)
+`
+
+type WorkflowPathExistsParams struct {
+	Column1 uuid.UUID `db:"column_1" json:"column_1"`
+	ID      uuid.UUID `db:"id" json:"id"`
+}
+
+func (q *Queries) WorkflowPathExists(ctx context.Context, arg WorkflowPathExistsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, workflowPathExists, arg.Column1, arg.ID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }

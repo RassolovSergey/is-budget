@@ -106,11 +106,278 @@ export interface ProjectMemberWithUser {
   user_id: UUID;
   role: ProjectRole;
   email: string;
+  first_name: string;
+  last_name: string;
   full_name: string;
   nickname: string;
   avatar_path?: string | null;
   default_currency_code: CurrencyCode;
   created_at: string;
+}
+
+export type WorkflowNodeStatus = "planned" | "ready" | "in_progress" | "done";
+
+export interface WorkflowNode {
+  id: UUID;
+  project_id: UUID;
+  title: string;
+  description: string;
+  status: WorkflowNodeStatus;
+  assignee_user_id?: UUID | null;
+  contribution_points: number;
+  completed_at?: string | null;
+  completed_by?: UUID | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowDependency {
+  id: UUID;
+  parent_node_id: UUID;
+  child_node_id: UUID;
+  created_at: string;
+}
+
+export interface ContributionLedgerEntry {
+  id: UUID;
+  project_id: UUID;
+  node_id: UUID;
+  user_id: UUID;
+  points: number;
+  created_at: string;
+}
+
+export interface WorkflowProjectGraph {
+  project_id: UUID;
+  nodes: WorkflowNode[];
+  dependencies: WorkflowDependency[];
+  contribution_ledger: ContributionLedgerEntry[];
+}
+
+export interface WorkflowContributionUserSummary {
+  user_id: UUID;
+  email: string;
+  full_name: string;
+  nickname: string;
+  earned_points: number;
+  share_of_total_project_points: number;
+  projected_points: number;
+  projected_share_percentage: number;
+  completed_nodes_count: number;
+}
+
+export interface WorkflowProjectSummary {
+  project_id: UUID;
+  total_project_points: number;
+  completed_points: number;
+  completion_percentage: number;
+  users: WorkflowContributionUserSummary[];
+}
+
+export type AllocationBlockType =
+  | "tax"
+  | "actual_expense"
+  | "custom_fee"
+  | "studio_distribution"
+  | "admin_distribution"
+  | "team_distribution";
+
+export type AllocationBlockValueType = "percent" | "fixed";
+export type AllocationBlockAppliesTo = "gross" | "current_balance";
+export type TeamDistributionMode = "percent" | "full_remainder";
+
+export interface AllocationBlock {
+  id: UUID;
+  project_id: UUID;
+  name: string;
+  type: AllocationBlockType;
+  level_index: number;
+  order_index: number;
+  enabled: boolean;
+  value_type: AllocationBlockValueType;
+  value: number;
+  applies_to: AllocationBlockAppliesTo;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AllocationPreviewStep {
+  block_id: UUID;
+  name: string;
+  type: AllocationBlockType;
+  level_index: number;
+  order_index: number;
+  value_type: AllocationBlockValueType;
+  value: number;
+  applies_to: AllocationBlockAppliesTo;
+  input_amount: number;
+  allocated_amount: number;
+  remaining_amount: number;
+  is_team_pool: boolean;
+  team_distribution_mode?: TeamDistributionMode | string;
+}
+
+export interface AllocationPreviewLevel {
+  level_index: number;
+  incoming_amount: number;
+  total_allocated: number;
+  remaining_amount: number;
+  steps: AllocationPreviewStep[];
+}
+
+export interface AllocationPreview {
+  project_id: UUID;
+  project_currency_code: CurrencyCode;
+  gross_amount: number;
+  gross_amount_source: "project_income_total" | "manual_override" | string;
+  total_deducted_before_team_pool: number;
+  final_remaining_amount: number;
+  final_team_pool_amount: number;
+  levels: AllocationPreviewLevel[];
+  steps: AllocationPreviewStep[];
+}
+
+export interface TeamPayoutPreviewMember {
+  user_id: UUID;
+  user_name: string;
+  total_points: number;
+  percentage_share: number;
+  payout_amount: number;
+  completed_nodes_count: number;
+}
+
+export interface TeamPayoutPreview {
+  project_id: UUID;
+  project_currency_code: CurrencyCode;
+  team_pool_amount: number;
+  total_points_in_pool: number;
+  number_of_eligible_members: number;
+  rounding_policy: string;
+  members: TeamPayoutPreviewMember[];
+}
+
+export interface PayoutSnapshotSummary {
+  id: UUID;
+  project_id: UUID;
+  created_by: UUID;
+  created_by_name: string;
+  created_at: string;
+  project_currency_code: CurrencyCode;
+  gross_amount: number;
+  gross_amount_source: string;
+  final_team_pool_amount: number;
+  total_points: number;
+  eligible_members_count: number;
+  member_count: number;
+  rounding_policy: string;
+  settlement_status: "draft" | "approved" | "ready_for_settlement";
+  settlement_note?: string | null;
+  approved_by?: UUID | null;
+  approved_by_name?: string | null;
+  approved_at?: string | null;
+}
+
+export interface PayoutSnapshotMember {
+  id: UUID;
+  snapshot_id: UUID;
+  user_id?: UUID | null;
+  user_name: string;
+  total_points: number;
+  percentage_share: number;
+  payout_amount: number;
+  completed_nodes_count: number;
+  order_index: number;
+}
+
+export interface PayoutSnapshotBlock {
+  id: UUID;
+  snapshot_id: UUID;
+  source_block_id?: UUID | null;
+  name: string;
+  type: string;
+  level_index: number;
+  order_index: number;
+  value_type: string;
+  value: number;
+  applies_to: string;
+  input_amount: number;
+  allocated_amount: number;
+  remaining_amount: number;
+  is_team_pool: boolean;
+}
+
+export interface PayoutSnapshotDetail extends PayoutSnapshotSummary {
+  members: PayoutSnapshotMember[];
+  blocks: PayoutSnapshotBlock[];
+}
+
+export type CampaignLifecycleStage = "pre_launch" | "live_campaign" | "post_campaign" | "closed";
+
+export interface CampaignConfig {
+  id: UUID;
+  project_id: UUID;
+  current_stage: CampaignLifecycleStage;
+  launch_at?: string | null;
+  late_pledges_enabled: boolean;
+  pledge_over_time_enabled: boolean;
+  pledge_manager_enabled: boolean;
+  digital_only_fulfillment: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CampaignStageSnapshot {
+  id: UUID;
+  project_id: UUID;
+  stage: CampaignLifecycleStage;
+  created_by: UUID;
+  created_by_name: string;
+  created_at: string;
+  followers_count?: number | null;
+  notes?: string | null;
+  gross_amount_snapshot?: number | null;
+  team_pool_snapshot?: number | null;
+}
+
+export type ImportRunStatus = "pending" | "success" | "failed";
+export type ImportRecordStatus = "success" | "failed" | "skipped";
+
+export interface ImportRunSummary {
+  id: UUID;
+  project_id: UUID;
+  uploaded_by: UUID;
+  uploaded_by_name: string;
+  import_type: string;
+  file_name: string;
+  status: ImportRunStatus;
+  error_message?: string | null;
+  rows_processed: number;
+  rows_succeeded: number;
+  rows_failed: number;
+  rows_skipped: number;
+  total_pledged?: number | null;
+  backer_count?: number | null;
+  reward_tiers_count?: number | null;
+  created_at: string;
+  completed_at?: string | null;
+}
+
+export interface ImportRecord {
+  id: UUID;
+  run_id: UUID;
+  row_number: number;
+  status: ImportRecordStatus;
+  error_message?: string | null;
+  pledged_at?: string | null;
+  pledged_amount?: number | null;
+  backer_identifier?: string | null;
+  reward_tier?: string | null;
+  created_at: string;
+}
+
+export interface ImportRunDetail {
+  run: ImportRunSummary;
+  records: ImportRecord[];
 }
 
 export interface ProjectInvite {
@@ -162,11 +429,15 @@ export interface PayoutPreviewItem {
   currency_code: CurrencyCode;
   conversion_rate: number;
   payout_amount_converted: number;
+  viewer_currency_code?: CurrencyCode;
+  viewer_conversion_rate?: number;
+  viewer_amount_converted?: number;
 }
 
 export interface PayoutPreview {
   project_currency_code: CurrencyCode;
   secondary_currency_code?: CurrencyCode;
+  viewer_currency_code?: CurrencyCode;
   distributed_amount: number;
   distributed_percent: number;
   remaining_amount: number;
@@ -269,6 +540,51 @@ export interface MyIncomeResponse {
     };
   } | null;
   items: MyIncomeItem[];
+}
+
+export interface TeamIncomeAmount {
+  project_amount: number;
+  project_currency_code: CurrencyCode;
+  user_amount: number;
+  user_currency_code: CurrencyCode;
+  conversion_rate_to_user: number;
+}
+
+export interface TeamIncomeForecastResponse {
+  project_id: UUID;
+  project_currency_code: CurrencyCode;
+  forecast_available: boolean;
+  latest_forecast_run_id?: UUID | null;
+  latest_forecast_created_at?: string | null;
+  scenario_model: {
+    poor: {
+      key: string;
+      label: string;
+      forecast_key: "p10";
+      description: string;
+    };
+    average: {
+      key: string;
+      label: string;
+      forecast_key: "yhat";
+      description: string;
+    };
+    good: {
+      key: string;
+      label: string;
+      forecast_key: "p90";
+      description: string;
+    };
+  };
+  members: Array<{
+    user_id: UUID;
+    full_name: string;
+    role: ProjectRole;
+    current_earned: TeamIncomeAmount;
+    poor_scenario?: TeamIncomeAmount | null;
+    average_scenario?: TeamIncomeAmount | null;
+    good_scenario?: TeamIncomeAmount | null;
+  }>;
 }
 
 export interface DashboardResponse {

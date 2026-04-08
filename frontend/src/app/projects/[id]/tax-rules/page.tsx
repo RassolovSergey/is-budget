@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 
 import { AppShell } from "../../../../components/AppShell";
@@ -61,11 +62,12 @@ export default function TaxRulesPage() {
   }, [ready, id, token]);
 
   const tr = (ru: string, en: string) => (locale === "en" ? en : ru);
+  const legacyReadOnly = true;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!(project?.current_user_role === "PM" || project?.current_user_role === "ANALYST")) {
-      setError(tr("Недостаточно прав для изменения налогов.", "Not enough permissions to edit taxes."));
+    if (legacyReadOnly) {
+      setError(tr("Этот legacy-раздел доступен только для просмотра. Основные налоги и сборы теперь настраиваются в «Финансовом конвейере».", "This legacy section is read-only. Configure taxes and fees in Finance Pipeline."));
       return;
     }
     setError("");
@@ -117,8 +119,8 @@ export default function TaxRulesPage() {
   }
 
   async function onDelete(ruleId: string) {
-    if (!(project?.current_user_role === "PM" || project?.current_user_role === "ANALYST")) {
-      setError(tr("Недостаточно прав для изменения налогов.", "Not enough permissions to edit taxes."));
+    if (legacyReadOnly) {
+      setError(tr("Этот legacy-раздел доступен только для просмотра. Основные налоги и сборы теперь настраиваются в «Финансовом конвейере».", "This legacy section is read-only. Configure taxes and fees in Finance Pipeline."));
       return;
     }
     const confirmed = await confirmAction({
@@ -163,8 +165,8 @@ export default function TaxRulesPage() {
 
   async function moveRuleToLevel(rule: ProjectTaxRule, targetLevel: number) {
     if (!token) return;
-    if (!(project?.current_user_role === "PM" || project?.current_user_role === "ANALYST")) {
-      setError(tr("Недостаточно прав для изменения налогов.", "Not enough permissions to edit taxes."));
+    if (legacyReadOnly) {
+      setError(tr("Этот legacy-раздел доступен только для просмотра. Основные налоги и сборы теперь настраиваются в «Финансовом конвейере».", "This legacy section is read-only. Configure taxes and fees in Finance Pipeline."));
       return;
     }
     const levelValidation = validateLevelInput(targetLevel, rule.id);
@@ -197,7 +199,7 @@ export default function TaxRulesPage() {
   if (!ready || !project) return null;
 
   const currencyCode = project.currency_code;
-  const canFinanceWrite = project.current_user_role === "PM" || project.current_user_role === "ANALYST";
+  const canFinanceWrite = false;
   const levelsMap = new Map<number, ProjectTaxRule[]>();
   for (const rule of rules) {
     if (!levelsMap.has(rule.level)) levelsMap.set(rule.level, []);
@@ -217,6 +219,19 @@ export default function TaxRulesPage() {
     <AppShell title={project.name} className="tax-rules-shell">
       <ProjectNav projectId={id} />
       {error && <p style={{ color: "#bc4749" }}>{error}</p>}
+
+      <section className="card legacy-route-note">
+        <strong>{tr("Legacy-раздел налогов", "Legacy tax section")}</strong>
+        <p>
+          {tr(
+            "Эта страница оставлена для совместимости со старыми проектами. Новые уровни налогов и сборов теперь настраиваются в «Финансовом конвейере».",
+            "This page remains for compatibility with older projects. New tax and fee levels should now be configured in Finance Pipeline."
+          )}
+        </p>
+        <Link href={`/projects/${id}/finance-pipeline`} className="inline-link">
+          {tr("Открыть финансовый конвейер", "Open Finance Pipeline")}
+        </Link>
+      </section>
 
       <div className="grid two tax-rules-top-grid">
         <section className="card finance-form-card">

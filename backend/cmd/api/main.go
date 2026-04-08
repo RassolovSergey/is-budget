@@ -17,10 +17,15 @@ import (
 	"isbudget/backend/internal/finance/actual_expenses"
 	"isbudget/backend/internal/finance/income"
 	"isbudget/backend/internal/finance/payout"
+	"isbudget/backend/internal/finance/pipeline"
 	"isbudget/backend/internal/finance/planned_expenses"
+	"isbudget/backend/internal/finance/snapshots"
 	"isbudget/backend/internal/finance/taxes"
+	"isbudget/backend/internal/finance/teampreview"
 	"isbudget/backend/internal/forecast"
 	"isbudget/backend/internal/fx"
+	importkickstarter "isbudget/backend/internal/import/kickstarter"
+	"isbudget/backend/internal/lifecycle"
 	"isbudget/backend/internal/projects"
 	"isbudget/backend/internal/workflow"
 
@@ -91,6 +96,23 @@ func main() {
 	payoutRepo := payout.NewPGRepository(q, pool)
 	payoutSvc := payout.NewService(payoutRepo, cfg.SnapshotsDir)
 	payoutHandler := payout.NewHandler(payoutSvc)
+
+	pipelineRepo := pipeline.NewPGRepository(q, pool)
+	pipelineSvc := pipeline.NewService(pipelineRepo)
+	pipelineHandler := pipeline.NewHandler(pipelineSvc)
+	teamPreviewSvc := teampreview.NewService(pipelineSvc, workflowSvc)
+	teamPreviewHandler := teampreview.NewHandler(teamPreviewSvc)
+	snapshotRepo := snapshots.NewPGRepository(q, pool)
+	snapshotSvc := snapshots.NewService(snapshotRepo, teamPreviewSvc, pipelineSvc)
+	snapshotHandler := snapshots.NewHandler(snapshotSvc)
+
+	lifecycleRepo := lifecycle.NewPGRepository(q, pool)
+	lifecycleSvc := lifecycle.NewService(lifecycleRepo, pipelineSvc)
+	lifecycleHandler := lifecycle.NewHandler(lifecycleSvc)
+
+	kickstarterImportRepo := importkickstarter.NewPGRepository(q)
+	kickstarterImportSvc := importkickstarter.NewService(kickstarterImportRepo)
+	kickstarterImportHandler := importkickstarter.NewHandler(kickstarterImportSvc)
 
 	forecastClient := forecast.NewHTTPAnalyticsClient(cfg.AnalyticsURL)
 	forecastRepo := forecast.NewPGRepository(q, pool)
@@ -188,17 +210,43 @@ func main() {
 			private.With(auth.RequireProjectPermission(q, auth.PermFinanceWrite)).Put("/projects/{projectId}/profit-share-rules/{id}", payoutHandler.UpdateRule)
 			private.With(auth.RequireProjectPermission(q, auth.PermFinanceWrite)).Delete("/projects/{projectId}/profit-share-rules/{id}", payoutHandler.DeleteRule)
 
+			private.With(auth.RequireProjectPermission(q, auth.PermFinanceRead)).Get("/projects/{projectId}/allocation-blocks", pipelineHandler.List)
+			private.With(auth.RequireProjectPermission(q, auth.PermProjectWrite)).Post("/projects/{projectId}/allocation-blocks", pipelineHandler.Create)
+			private.With(auth.RequireProjectPermission(q, auth.PermProjectWrite)).Put("/projects/{projectId}/allocation-blocks/reorder", pipelineHandler.Reorder)
+			private.With(auth.RequireProjectPermission(q, auth.PermProjectWrite)).Put("/projects/{projectId}/allocation-blocks/{id}", pipelineHandler.Update)
+			private.With(auth.RequireProjectPermission(q, auth.PermProjectWrite)).Delete("/projects/{projectId}/allocation-blocks/{id}", pipelineHandler.Delete)
+			private.With(auth.RequireProjectPermission(q, auth.PermFinanceRead)).Post("/projects/{projectId}/allocation-preview", pipelineHandler.Preview)
+			private.With(auth.RequireProjectPermission(q, auth.PermProjectRead)).Get("/projects/{projectId}/team-payout-preview", teamPreviewHandler.Preview)
+			private.With(auth.RequireProjectPermission(q, auth.PermProjectRead)).Get("/projects/{projectId}/payout-snapshots", snapshotHandler.List)
+			private.With(auth.RequireProjectPermission(q, auth.PermProjectWrite)).Post("/projects/{projectId}/payout-snapshots", snapshotHandler.Create)
+			private.Get("/payout-snapshots/{id}", snapshotHandler.Get)
+			private.With(auth.RequireProjectPermission(q, auth.PermProjectWrite)).Put("/payout-snapshots/{id}/settlement", snapshotHandler.UpdateSettlement)
+			private.With(auth.RequireProjectPermission(q, auth.PermProjectRead)).Get("/projects/{projectId}/campaign-config", lifecycleHandler.GetConfig)
+			private.With(auth.RequireProjectPermission(q, auth.PermProjectWrite)).Put("/projects/{projectId}/campaign-config", lifecycleHandler.UpdateConfig)
+			private.With(auth.RequireProjectPermission(q, auth.PermProjectRead)).Get("/projects/{projectId}/campaign-stage-snapshots", lifecycleHandler.ListSnapshots)
+			private.With(auth.RequireProjectPermission(q, auth.PermProjectWrite)).Post("/projects/{projectId}/campaign-stage-snapshots", lifecycleHandler.CreateSnapshot)
+			private.Get("/campaign-stage-snapshots/{id}", lifecycleHandler.GetSnapshot)
+			private.With(auth.RequireProjectPermission(q, auth.PermProjectRead)).Get("/projects/{projectId}/imports", kickstarterImportHandler.ListRuns)
+			private.With(auth.RequireProjectPermission(q, auth.PermProjectWrite)).Post("/projects/{projectId}/imports/kickstarter", kickstarterImportHandler.Upload)
+			private.Get("/imports/{id}", kickstarterImportHandler.GetRun)
+
 			private.With(auth.RequireProjectPermission(q, auth.PermFinanceRead)).Get("/projects/{projectId}/payout-preview", payoutHandler.PayoutPreview)
 			private.With(auth.RequireProjectPermission(q, auth.PermProjectRead)).Get("/projects/{projectId}/my-income", payoutHandler.MyIncome)
+			private.With(auth.RequireProjectPermission(q, auth.PermProjectWrite)).Get("/projects/{projectId}/team-income-forecast", payoutHandler.TeamIncomeForecast)
 			private.With(auth.RequireProjectPermission(q, auth.PermFinanceWrite)).Post("/projects/{projectId}/payouts/calculate", payoutHandler.CalculatePayouts)
 			private.With(auth.RequireProjectPermission(q, auth.PermFinanceRead)).Get("/projects/{projectId}/payout-snapshots/{fileName}", payoutHandler.DownloadSnapshot)
 
 			private.With(auth.RequireProjectPermission(q, auth.PermDashboardRead)).Get("/projects/{projectId}/dashboard", dashboardHandler.Get)
 
 			private.Post("/workflow/node", workflowHandler.CreateNode)
+			private.Put("/workflow/node/{id}", workflowHandler.UpdateNode)
+			private.Post("/workflow/node/{id}/dependency", workflowHandler.AddDependency)
+			private.Delete("/workflow/node/{id}/dependency/{parentId}", workflowHandler.RemoveDependency)
 			private.Post("/workflow/node/{id}/assign", workflowHandler.AssignUser)
+			private.Post("/workflow/node/{id}/unassign", workflowHandler.UnassignUser)
 			private.Post("/workflow/node/{id}/complete", workflowHandler.CompleteNode)
 			private.Get("/workflow/project/{id}", workflowHandler.GetProject)
+			private.Get("/workflow/project/{id}/summary", workflowHandler.GetSummary)
 
 			private.With(auth.RequireProjectPermission(q, auth.PermForecastWrite)).Post("/projects/{projectId}/forecast", forecastHandler.Run)
 			private.With(auth.RequireProjectPermission(q, auth.PermForecastRead)).Get("/projects/{projectId}/forecast/runs", forecastHandler.ListRuns)

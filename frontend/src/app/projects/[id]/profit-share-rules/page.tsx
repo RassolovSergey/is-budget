@@ -19,7 +19,6 @@ import { useAuthGuard } from "../../../../lib/useAuthGuard";
 type FormState = {
   id?: string;
   recipient_user_id: string;
-  recipient_name: string;
   responsibility: string;
   level: string;
   percent: string;
@@ -27,7 +26,6 @@ type FormState = {
 
 const initialForm: FormState = {
   recipient_user_id: "",
-  recipient_name: "",
   responsibility: "",
   level: "1",
   percent: ""
@@ -39,11 +37,27 @@ function levelLabel(level: number, locale: Locale): string {
   return locale === "en" ? `Level ${level}` : `Уровень ${level}`;
 }
 
+function displayMemberName(member: ProjectMemberWithUser): string {
+  const firstLast = `${member.first_name || ""} ${member.last_name || ""}`.trim();
+  if (firstLast) return firstLast;
+  if (member.full_name?.trim()) return member.full_name.trim();
+  if (member.nickname?.trim()) return member.nickname.trim();
+  if (member.email?.trim()) return member.email.trim();
+  return "Unknown member";
+}
+
 function normalizeProfitShareRuleError(err: unknown, locale: Locale): string {
   const tr = (ru: string, en: string) => (locale === "en" ? en : ru);
   const message = err instanceof Error ? err.message : "";
 
   if (err instanceof ApiError) {
+    if (err.status === 400 && err.code === "invalid_request" && err.message === "recipient_user_id is required") {
+      return tr(
+        "Выберите участника проекта для правила распределения.",
+        "Select a project member for this payout rule."
+      );
+    }
+
     if (err.status === 400 && err.code === "invalid_request" && err.message === "recipient_user_id must belong to a project member") {
       return tr(
         "Выберите корректного участника проекта для привязки правила.",
@@ -123,6 +137,7 @@ export default function ProfitShareRulesPage() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const tr = (ru: string, en: string) => (locale === "en" ? en : ru);
+  const legacyReadOnly = true;
   const displayResponsibility = (value: string) => {
     const normalized = value.trim().toLowerCase();
     if (!normalized) return "-";
@@ -148,7 +163,7 @@ export default function ProfitShareRulesPage() {
       setPreview(previewResp);
       setMembers(membersResp);
       const selfMember = membersResp.find((member) => member.user_id === meResp.id);
-      const canManage = selfMember?.role === "PM";
+      const canManage = !legacyReadOnly && selfMember?.role === "PM";
       setCanManageMembers(canManage);
 
       if (canManage && compressed.repairs.length > 0 && !isRepairingLevels) {
@@ -160,7 +175,6 @@ export default function ProfitShareRulesPage() {
               token,
               body: {
                 recipient_user_id: repair.rule.recipient_user_id || undefined,
-                recipient_name: repair.rule.recipient_name,
                 responsibility: repair.rule.responsibility,
                 percent: repair.rule.percent,
                 level: repair.level,
@@ -259,14 +273,18 @@ export default function ProfitShareRulesPage() {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!(project?.current_user_role === "PM" || project?.current_user_role === "ANALYST")) {
-      setError(tr("Недостаточно прав для изменения правил распределения.", "Not enough permissions to edit profit-sharing rules."));
+    if (legacyReadOnly) {
+      setError(tr("Этот legacy-раздел доступен только для просмотра. Основное распределение денег теперь настраивается через «Финансовый конвейер».", "This legacy section is read-only. Configure the main money distribution in Finance Pipeline."));
       return;
     }
     setError("");
     const percent = Number(form.percent);
     if (form.percent.trim() === "" || Number.isNaN(percent) || percent < 0 || percent > 100) {
       setError(tr("Процент должен быть числом от 0 до 100.", "Percent must be a number from 0 to 100."));
+      return;
+    }
+    if (!form.recipient_user_id) {
+      setError(tr("Выберите участника проекта для этого правила.", "Select a project member for this rule."));
       return;
     }
     const level = !form.id && prependBeforeFirst ? 1 : Number(form.level);
@@ -287,7 +305,6 @@ export default function ProfitShareRulesPage() {
 
     const body = {
       recipient_user_id: form.recipient_user_id || undefined,
-      recipient_name: form.recipient_name,
       responsibility: form.responsibility,
       percent,
       level,
@@ -312,7 +329,6 @@ export default function ProfitShareRulesPage() {
     setForm({
       id: rule.id,
       recipient_user_id: rule.recipient_user_id || "",
-      recipient_name: rule.recipient_name,
       responsibility: rule.responsibility,
       level: String(rule.level || 1),
       percent: String(rule.percent)
@@ -321,8 +337,8 @@ export default function ProfitShareRulesPage() {
   }
 
   async function onDelete(ruleId: string) {
-    if (!(project?.current_user_role === "PM" || project?.current_user_role === "ANALYST")) {
-      setError(tr("Недостаточно прав для изменения правил распределения.", "Not enough permissions to edit profit-sharing rules."));
+    if (legacyReadOnly) {
+      setError(tr("Этот legacy-раздел доступен только для просмотра. Основное распределение денег теперь настраивается через «Финансовый конвейер».", "This legacy section is read-only. Configure the main money distribution in Finance Pipeline."));
       return;
     }
     const confirmed = await confirmAction({
@@ -343,6 +359,10 @@ export default function ProfitShareRulesPage() {
   }
 
   async function addMember() {
+    if (legacyReadOnly) {
+      setError(tr("Этот legacy-раздел доступен только для просмотра. Управление составом команды продолжайте через основной проект и «Финансовый конвейер».", "This legacy section is read-only. Continue team and finance setup through the main project and Finance Pipeline."));
+      return;
+    }
     if (!token) return;
     const lookup = parseMemberLookup(memberLookup);
     if (!lookup) {
@@ -368,8 +388,8 @@ export default function ProfitShareRulesPage() {
 
   async function moveRuleToLevel(rule: ProfitShareRule, targetLevel: number) {
     if (!token) return;
-    if (!(project?.current_user_role === "PM" || project?.current_user_role === "ANALYST")) {
-      setError(tr("Недостаточно прав для изменения правил распределения.", "Not enough permissions to edit profit-sharing rules."));
+    if (legacyReadOnly) {
+      setError(tr("Этот legacy-раздел доступен только для просмотра. Основное распределение денег теперь настраивается через «Финансовый конвейер».", "This legacy section is read-only. Configure the main money distribution in Finance Pipeline."));
       return;
     }
     const levelValidation = validateLevelInput(targetLevel, rule.id);
@@ -392,7 +412,6 @@ export default function ProfitShareRulesPage() {
         token,
         body: {
           recipient_user_id: rule.recipient_user_id || undefined,
-          recipient_name: rule.recipient_name,
           responsibility: rule.responsibility,
           percent: rule.percent,
           level: targetLevel,
@@ -408,8 +427,8 @@ export default function ProfitShareRulesPage() {
   }
 
   async function calculatePayouts() {
-    if (!(project?.current_user_role === "PM" || project?.current_user_role === "ANALYST")) {
-      setError(tr("Недостаточно прав для сохранения снимка выплат.", "Not enough permissions to save payout snapshot."));
+    if (legacyReadOnly) {
+      setError(tr("Этот legacy-раздел доступен только для просмотра. Для новых снимков и settlement используйте «Финансовый конвейер».", "This legacy section is read-only. Use Finance Pipeline for new snapshots and settlement."));
       return;
     }
     setError("");
@@ -439,7 +458,7 @@ export default function ProfitShareRulesPage() {
 
   if (!ready || !project) return null;
   const currencyCode = project.currency_code;
-  const canFinanceWrite = project.current_user_role === "PM" || project.current_user_role === "ANALYST";
+  const canFinanceWrite = false;
 
   const levelsMap = new Map<number, ProfitShareRule[]>();
   for (const rule of rules) {
@@ -463,6 +482,7 @@ export default function ProfitShareRulesPage() {
   const distributedPercent = preview ? preview.distributed_percent : 0;
   const membersByID = new Map(members.map((member) => [member.user_id, member]));
   const linkedMember = form.recipient_user_id ? membersByID.get(form.recipient_user_id) : undefined;
+  const linkedMemberName = linkedMember ? displayMemberName(linkedMember) : "";
   const roleOptions = projectRoleOptions(t);
   const selectedMemberRoleView = projectRoleView(t, memberRole);
 
@@ -471,6 +491,19 @@ export default function ProfitShareRulesPage() {
       <ProjectNav projectId={id} />
       {error && <p style={{ color: "#bc4749" }}>{error}</p>}
       {notice && <p style={{ color: "#2a9d8f" }}>{notice}</p>}
+
+      <section className="card legacy-route-note">
+        <strong>{tr("Legacy-раздел правил распределения", "Legacy distribution rules section")}</strong>
+        <p>
+          {tr(
+            "Эта логика больше не является основной моделью денежного потока. Для новых проектов используйте «Финансовый конвейер», а этот раздел считайте совместимым legacy-экраном.",
+            "This logic is no longer the main money-flow model. Use Finance Pipeline for new projects, and treat this section as a legacy compatibility screen."
+          )}
+        </p>
+        <Link href={`/projects/${id}/finance-pipeline`} className="inline-link">
+          {tr("Открыть финансовый конвейер", "Open Finance Pipeline")}
+        </Link>
+      </section>
 
       <section className="card profit-team-card" style={{ marginBottom: 14 }}>
         <div className="finance-card-head">
@@ -528,17 +561,23 @@ export default function ProfitShareRulesPage() {
               <thead>
                 <tr>
                   <th>{tr("Имя", "Name")}</th>
-                  <th>Email</th>
-                  <th>{tr("Никнейм", "Nickname")}</th>
                   <th>{tr("Роль", "Role")}</th>
+                  <th>{tr("Выплата", "Payout")}</th>
                 </tr>
               </thead>
               <tbody>
                 {members.map((member) => (
                   <tr key={member.id}>
-                    <td>{member.full_name}</td>
-                    <td>{member.email}</td>
-                    <td>@{member.nickname}</td>
+                    <td>
+                      <div style={{ display: "grid", gap: 2 }}>
+                        <strong style={{ fontSize: "1rem", lineHeight: 1.2 }}>
+                          {displayMemberName(member)}
+                        </strong>
+                        <span className="subtle" style={{ fontSize: "0.85rem", lineHeight: 1.2 }}>
+                          {member.email}
+                        </span>
+                      </div>
+                    </td>
                     <td>
                       <div style={{ display: "grid", gap: 2 }}>
                         <strong style={{ fontSize: "1rem", lineHeight: 1.2 }}>
@@ -549,6 +588,7 @@ export default function ProfitShareRulesPage() {
                         </span>
                       </div>
                     </td>
+                    <td>{member.default_currency_code}</td>
                   </tr>
                 ))}
               </tbody>
@@ -577,37 +617,28 @@ export default function ProfitShareRulesPage() {
               {tr("Получатель из команды (строгое связывание)", "Recipient from project team (strict binding)")}
               <select
                 value={form.recipient_user_id}
-                onChange={(e) => {
-                  const selectedUserID = e.target.value;
-                  const selectedMember = members.find((member) => member.user_id === selectedUserID);
-                  setForm({
-                    ...form,
-                    recipient_user_id: selectedUserID,
-                    recipient_name: selectedMember?.full_name || form.recipient_name
-                  });
-                }}
+                onChange={(e) => setForm({ ...form, recipient_user_id: e.target.value })}
                 disabled={!canFinanceWrite}
+                required
               >
-                <option value="">{tr("Без привязки к аккаунту", "No account binding")}</option>
+                <option value="">{tr("Выберите участника проекта", "Select a project member")}</option>
                 {members.map((member) => (
                   <option key={member.user_id} value={member.user_id}>
-                    {member.full_name} · @{member.nickname}
+                    {displayMemberName(member)}
                   </option>
                 ))}
               </select>
             </label>
-            <input
-              placeholder={tr("Имя получателя", "Recipient name")}
-              value={form.recipient_name}
-              onChange={(e) => setForm({ ...form, recipient_name: e.target.value })}
-              disabled={!canFinanceWrite}
-              required
-            />
             <p className="subtle" style={{ margin: 0 }}>
-              {tr(
-                "Для вкладки «Мой доход» используйте привязку к участнику выше. Это надёжнее, чем совпадение по тексту.",
-                "For the My Income tab, use recipient binding above. It is more reliable than text matching."
-              )}
+              {linkedMember
+                ? tr(
+                    `${linkedMemberName} — ${projectRoleView(t, linkedMember.role).title}. Имя получателя подтянется автоматически из аккаунта.`,
+                    `${linkedMemberName} — ${projectRoleView(t, linkedMember.role).title}. Recipient name is derived automatically from the linked account.`
+                  )
+                : tr(
+                    "Правило можно создать только для действующего участника проекта.",
+                    "Rules can only be created for current project members."
+                  )}
             </p>
             <p className="subtle" style={{ margin: 0 }}>
               {linkedMember
@@ -615,10 +646,7 @@ export default function ProfitShareRulesPage() {
                     `Валюта выплаты автоматически берётся из профиля участника: ${linkedMember.default_currency_code}.`,
                     `Payout currency is taken automatically from the member profile: ${linkedMember.default_currency_code}.`
                   )
-                : tr(
-                    `Без привязки к аккаунту выплата остаётся в валюте проекта: ${currencyCode}.`,
-                    `Without an account link, the payout stays in the project currency: ${currencyCode}.`
-                  )}
+                : tr(`Базовая валюта проекта: ${currencyCode}.`, `Project base currency: ${currencyCode}.`)}
             </p>
             <input
               placeholder={tr("За что отвечает (должность / зона ответственности)", "Responsibility (position / area)")}
@@ -778,18 +806,27 @@ export default function ProfitShareRulesPage() {
                             setDragOverLevel(null);
                           }}
                         >
-                          <div className="tax-rule-card-main">
-                            <strong>{rule.recipient_name}</strong>
-                            <span>{rule.percent}%</span>
-                          </div>
-                          <p className="subtle" style={{ margin: 0 }}>
-                            {rule.responsibility || "-"} · {(rule.recipient_user_id && membersByID.get(rule.recipient_user_id)?.default_currency_code) || rule.currency_code || currencyCode}
-                          </p>
-                          {rule.recipient_user_id && membersByID.get(rule.recipient_user_id) && (
-                            <p className="subtle" style={{ margin: 0 }}>
-                              {tr("Аккаунт", "Account")}: {membersByID.get(rule.recipient_user_id)?.full_name} · @{membersByID.get(rule.recipient_user_id)?.nickname}
-                            </p>
-                          )}
+                          {(() => {
+                            const linkedRuleMember = rule.recipient_user_id ? membersByID.get(rule.recipient_user_id) : undefined;
+                            const roleView = linkedRuleMember ? projectRoleView(t, linkedRuleMember.role) : null;
+                            const recipientLabel = linkedRuleMember ? displayMemberName(linkedRuleMember) : rule.recipient_name;
+                            return (
+                              <>
+                                <div className="tax-rule-card-main">
+                                  <strong>{recipientLabel}</strong>
+                                  <span>{rule.percent}%</span>
+                                </div>
+                                <p className="subtle" style={{ margin: 0 }}>
+                                  {displayResponsibility(rule.responsibility)} · {(linkedRuleMember?.default_currency_code || rule.currency_code || currencyCode)}
+                                </p>
+                                {roleView && (
+                                  <p className="subtle" style={{ margin: 0 }}>
+                                    {roleView.title}
+                                  </p>
+                                )}
+                              </>
+                            );
+                          })()}
                           <div className="profit-rules-actions">
                             <button type="button" className="secondary" onClick={() => startEdit(rule)} disabled={!canFinanceWrite}>{tr("Редактировать", "Edit")}</button>
                             <button type="button" className="warn" onClick={() => onDelete(rule.id)} disabled={!canFinanceWrite}>{tr("Удалить", "Delete")}</button>
@@ -851,6 +888,17 @@ export default function ProfitShareRulesPage() {
       {preview && (
         <section className="card profit-preview-card" style={{ marginTop: 14 }}>
           <h2 className="title">{tr("Предпросмотр выплат", "Payout preview")}</h2>
+          <p className="subtle" style={{ marginTop: 0 }}>
+            {preview.viewer_currency_code
+              ? tr(
+                  `Сначала показана сумма в валюте проекта (${currencyCode}), ниже — эквивалент в вашей валюте (${preview.viewer_currency_code}).`,
+                  `Each payout shows the project-currency amount first (${currencyCode}), then the equivalent in your currency (${preview.viewer_currency_code}).`
+                )
+              : tr(
+                  `Сначала показана сумма в валюте проекта (${currencyCode}). Если конвертация недоступна, предпросмотр остаётся в базовой валюте проекта.`,
+                  `Each payout shows the project-currency amount first (${currencyCode}). If conversion is unavailable, the preview stays in the project base currency.`
+                )}
+          </p>
           <div className="grid three tax-impact-grid" style={{ marginBottom: 12 }}>
             <article className="tax-impact-item">
               <p className="subtle">{tr("Чистая прибыль", "Net profit")}</p>
@@ -876,22 +924,40 @@ export default function ProfitShareRulesPage() {
                 <th>{tr("Ответственность", "Responsibility")}</th>
                 <th>{tr("Уровень", "Level")}</th>
                 <th>{tr("Процент", "Percent")}</th>
-                <th>{tr("Сумма выплаты", "Payout amount")}</th>
+                <th>{tr("Сумма выплаты / ваша валюта", "Payout / your currency")}</th>
               </tr>
             </thead>
             <tbody>
               {preview.items.map((item, index) => (
                 <tr key={`${item.rule_id}-${index}`}>
-                  <td>{item.recipient_name}</td>
-                  <td>{displayResponsibility(item.responsibility)}</td>
-                  <td>{levelLabel(item.level || 1, locale)}</td>
-                  <td>{item.percent}%</td>
-                  <td>
-                    <div className="money-stack">
-                      <strong>{money(item.payout_amount_converted, item.currency_code)}</strong>
-                      <span>{money(item.payout_amount, currencyCode)}</span>
-                    </div>
-                  </td>
+                  {(() => {
+                    const linkedPreviewMember = item.recipient_user_id ? membersByID.get(item.recipient_user_id) : undefined;
+                    const roleView = linkedPreviewMember ? projectRoleView(t, linkedPreviewMember.role) : null;
+                    const recipientLabel = linkedPreviewMember ? displayMemberName(linkedPreviewMember) : item.recipient_name;
+                    return (
+                      <>
+                        <td>
+                          <div className="money-stack">
+                            <strong>{recipientLabel}</strong>
+                            <span>{roleView?.title || "—"}</span>
+                          </div>
+                        </td>
+                        <td>{displayResponsibility(item.responsibility)}</td>
+                        <td>{levelLabel(item.level || 1, locale)}</td>
+                        <td>{item.percent}%</td>
+                        <td>
+                          <div className="money-stack">
+                            <strong>{money(item.payout_amount, currencyCode)}</strong>
+                            {item.viewer_amount_converted !== undefined && preview.viewer_currency_code ? (
+                              <span>{money(item.viewer_amount_converted, preview.viewer_currency_code)}</span>
+                            ) : (
+                              <span>{tr("Конвертация недоступна", "Conversion unavailable")}</span>
+                            )}
+                          </div>
+                        </td>
+                      </>
+                    );
+                  })()}
                 </tr>
               ))}
               {!preview.items.length && (

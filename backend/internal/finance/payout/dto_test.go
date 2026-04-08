@@ -10,7 +10,6 @@ func TestUpsertRuleRequestAllowsGeneralUUIDRecipientUserID(t *testing.T) {
 	validate := common.NewValidator()
 	req := upsertRuleRequest{
 		RecipientUserID: "11111111-1111-1111-1111-111111111111",
-		RecipientName:   "Demo PM",
 		Responsibility:  "Producer",
 		Percent:         25,
 		Level:           1,
@@ -25,7 +24,6 @@ func TestUpsertRuleRequestRejectsInvalidRecipientUserID(t *testing.T) {
 	validate := common.NewValidator()
 	req := upsertRuleRequest{
 		RecipientUserID: "not-a-uuid",
-		RecipientName:   "Demo PM",
 		Responsibility:  "Producer",
 		Percent:         25,
 		Level:           1,
@@ -33,5 +31,18 @@ func TestUpsertRuleRequestRejectsInvalidRecipientUserID(t *testing.T) {
 
 	if err := validate.Struct(req); err == nil {
 		t.Fatal("expected invalid recipient_user_id to fail validation")
+	}
+}
+
+func TestUpsertRuleRequestRejectsMissingRecipientUserID(t *testing.T) {
+	validate := common.NewValidator()
+	req := upsertRuleRequest{
+		Responsibility: "Producer",
+		Percent:        25,
+		Level:          1,
+	}
+
+	if err := validate.Struct(req); err == nil {
+		t.Fatal("expected missing recipient_user_id to fail validation")
 	}
 }

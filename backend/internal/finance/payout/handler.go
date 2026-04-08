@@ -61,7 +61,6 @@ func (h *Handler) CreateRule(w http.ResponseWriter, r *http.Request) {
 		item, err = h.svc.CreateRulePrepend(r.Context(), sqlc.CreateProfitShareRuleParams{
 			ProjectID:             projectID,
 			RecipientUserID:       recipientUserID,
-			RecipientName:         req.RecipientName,
 			Responsibility:        req.Responsibility,
 			CurrencyCode:          req.CurrencyCode,
 			Percent:               req.Percent,
@@ -72,7 +71,6 @@ func (h *Handler) CreateRule(w http.ResponseWriter, r *http.Request) {
 		item, err = h.svc.CreateRule(r.Context(), sqlc.CreateProfitShareRuleParams{
 			ProjectID:             projectID,
 			RecipientUserID:       recipientUserID,
-			RecipientName:         req.RecipientName,
 			Responsibility:        req.Responsibility,
 			CurrencyCode:          req.CurrencyCode,
 			Percent:               req.Percent,
@@ -87,6 +85,7 @@ func (h *Handler) CreateRule(w http.ResponseWriter, r *http.Request) {
 			common.ErrorMapping{Err: ErrInvalidRuleLevelSequence, Status: http.StatusBadRequest, Code: "invalid_request"},
 			common.ErrorMapping{Err: ErrRuleNextLevelBlocked, Status: http.StatusBadRequest, Code: "invalid_request"},
 			common.ErrorMapping{Err: ErrInvalidRuleCurrency, Status: http.StatusBadRequest, Code: "invalid_request"},
+			common.ErrorMapping{Err: ErrRecipientUserRequired, Status: http.StatusBadRequest, Code: "invalid_request"},
 			common.ErrorMapping{Err: ErrInvalidRecipientUser, Status: http.StatusBadRequest, Code: "invalid_request"},
 		)
 		return
@@ -119,7 +118,6 @@ func (h *Handler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 		ProjectID:             projectID,
 		ID:                    id,
 		RecipientUserID:       recipientUserID,
-		RecipientName:         req.RecipientName,
 		Responsibility:        req.Responsibility,
 		CurrencyCode:          req.CurrencyCode,
 		Percent:               req.Percent,
@@ -133,6 +131,7 @@ func (h *Handler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 			common.ErrorMapping{Err: ErrInvalidRuleLevelSequence, Status: http.StatusBadRequest, Code: "invalid_request"},
 			common.ErrorMapping{Err: ErrRuleNextLevelBlocked, Status: http.StatusBadRequest, Code: "invalid_request"},
 			common.ErrorMapping{Err: ErrInvalidRuleCurrency, Status: http.StatusBadRequest, Code: "invalid_request"},
+			common.ErrorMapping{Err: ErrRecipientUserRequired, Status: http.StatusBadRequest, Code: "invalid_request"},
 			common.ErrorMapping{Err: ErrInvalidRecipientUser, Status: http.StatusBadRequest, Code: "invalid_request"},
 		)
 		return
@@ -161,7 +160,12 @@ func (h *Handler) PayoutPreview(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	preview, err := h.svc.Preview(r.Context(), projectID)
+	user, ok := auth.UserFromContext(r.Context())
+	if !ok {
+		common.WriteError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	preview, err := h.svc.PreviewForUser(r.Context(), projectID, user.ID)
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, "failed to calculate payout preview")
 		return
@@ -183,6 +187,19 @@ func (h *Handler) MyIncome(w http.ResponseWriter, r *http.Request) {
 	result, err := h.svc.MyIncome(r.Context(), projectID, user.ID)
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, "failed to calculate my income")
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) TeamIncomeForecast(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := parseProjectID(w, r)
+	if !ok {
+		return
+	}
+	result, err := h.svc.TeamIncomeForecast(r.Context(), projectID)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to calculate team income forecast")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, result)

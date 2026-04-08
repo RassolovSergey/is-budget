@@ -415,6 +415,8 @@ SELECT pm.id,
        pm.role,
        pm.created_at,
        u.email,
+       u.first_name,
+       u.last_name,
        u.full_name,
        u.nickname,
        u.avatar_path,
@@ -432,6 +434,8 @@ type ListProjectMembersRow struct {
 	Role                ProjectRole `db:"role" json:"role"`
 	CreatedAt           time.Time   `db:"created_at" json:"created_at"`
 	Email               string      `db:"email" json:"email"`
+	FirstName           string      `db:"first_name" json:"first_name"`
+	LastName            string      `db:"last_name" json:"last_name"`
 	FullName            string      `db:"full_name" json:"full_name"`
 	Nickname            string      `db:"nickname" json:"nickname"`
 	AvatarPath          *string     `db:"avatar_path" json:"avatar_path"`
@@ -454,6 +458,8 @@ func (q *Queries) ListProjectMembers(ctx context.Context, projectID uuid.UUID) (
 			&i.Role,
 			&i.CreatedAt,
 			&i.Email,
+			&i.FirstName,
+			&i.LastName,
 			&i.FullName,
 			&i.Nickname,
 			&i.AvatarPath,

@@ -9,11 +9,13 @@ import { useLocale } from "../../../../components/LocaleProvider";
 import { ProjectNav } from "../../../../components/ProjectNav";
 import { useToast } from "../../../../components/ToastProvider";
 import { apiRequest } from "../../../../lib/api";
+import { INVITES_UPDATED_EVENT, PROJECTS_UPDATED_EVENT } from "../../../../lib/appEvents";
 import { parseMemberLookup } from "../../../../lib/memberLookup";
 import { normalizeProjectInviteError } from "../../../../lib/projectInviteErrors";
 import { projectRoleOptions, projectRoleView } from "../../../../lib/projectRoles";
 import type { Project, ProjectInviteView, ProjectMemberWithUser, ProjectRole, User } from "../../../../lib/types";
 import { useAuthGuard } from "../../../../lib/useAuthGuard";
+import { useLiveRefresh } from "../../../../lib/useLiveRefresh";
 
 export default function ProjectMembersPage() {
   const { id } = useParams<{ id: string }>();
@@ -66,6 +68,12 @@ export default function ProjectMembersPage() {
       void load();
     }
   }, [ready, id, token]);
+
+  useLiveRefresh(load, {
+    enabled: ready && !!token,
+    intervalMs: canManageMembers ? 7000 : 10000,
+    eventNames: [INVITES_UPDATED_EVENT, PROJECTS_UPDATED_EVENT]
+  });
 
   const pmCount = useMemo(() => members.filter((member) => member.role === "PM").length, [members]);
   const pendingInvites = useMemo(() => invites.filter((invite) => invite.status === "pending"), [invites]);

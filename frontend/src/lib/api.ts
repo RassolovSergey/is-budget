@@ -22,6 +22,12 @@ type RequestOptions = {
   body?: unknown;
 };
 
+type UploadOptions = {
+  method?: string;
+  token?: string;
+  body: FormData;
+};
+
 export async function apiRequest<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: opts.method || "GET",
@@ -95,6 +101,44 @@ export async function apiDownload(path: string, token?: string): Promise<Blob> {
   }
 
   return await res.blob();
+}
+
+export async function apiUpload<T>(path: string, opts: UploadOptions): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: opts.method || "POST",
+    headers: {
+      ...(opts.token ? { Authorization: `Bearer ${opts.token}` } : {})
+    },
+    body: opts.body,
+    cache: "no-store"
+  });
+
+  if (res.status === 401 && !path.startsWith("/auth/")) {
+    clearToken();
+    if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+      const target = encodeURIComponent(window.location.pathname + window.location.search);
+      window.location.href = `/login?next=${target}&reason=expired`;
+    }
+    throw new Error("Сессия истекла. Войдите заново.");
+  }
+
+  if (!res.ok) {
+    let msg = `Request failed (${res.status})`;
+    let code: string | undefined;
+    let details: Record<string, string> | undefined;
+    try {
+      const payload = await res.json();
+      if (payload.error) msg = payload.error;
+      if (payload.code) code = payload.code;
+      if (payload.details) details = payload.details;
+    } catch {
+      // keep default message
+    }
+    throw new ApiError(msg, res.status, code, details);
+  }
+
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
 }
 
 export function apiAssetUrl(path: string): string {

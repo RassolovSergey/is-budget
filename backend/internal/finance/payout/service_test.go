@@ -18,6 +18,7 @@ type fakeRepo struct {
 	taxRules       []sqlc.ProjectTaxRule
 	project        sqlc.Project
 	user           sqlc.User
+	users          map[uuid.UUID]sqlc.User
 	members        []sqlc.ProjectMemberWithUser
 	currencyRate   map[string]sqlc.CurrencyRate
 	forecastRun    sqlc.ForecastRun
@@ -43,6 +44,11 @@ func (f *fakeRepo) GetProjectByID(ctx context.Context, id uuid.UUID) (sqlc.Proje
 }
 
 func (f *fakeRepo) GetUserByID(ctx context.Context, id uuid.UUID) (sqlc.User, error) {
+	if f.users != nil {
+		if user, ok := f.users[id]; ok {
+			return user, nil
+		}
+	}
 	if f.user.ID == uuid.Nil {
 		return sqlc.User{
 			ID:                  id,
@@ -400,6 +406,7 @@ func TestBuildPreviewItemsByLevels(t *testing.T) {
 
 func TestCreateRuleRejectsPercentOverflowInSameLevel(t *testing.T) {
 	projectID := uuid.New()
+	memberID := uuid.New()
 	repo := &fakeRepo{
 		rules: []sqlc.ProfitShareRule{
 			{
@@ -411,12 +418,15 @@ func TestCreateRuleRejectsPercentOverflowInSameLevel(t *testing.T) {
 				AppliesAfterMandatory: false,
 			},
 		},
+		members: []sqlc.ProjectMemberWithUser{
+			{UserID: memberID, FullName: "Overflow User"},
+		},
 	}
 	svc := NewService(repo)
 
 	_, err := svc.CreateRule(context.Background(), sqlc.CreateProfitShareRuleParams{
 		ProjectID:             projectID,
-		RecipientName:         "Overflow",
+		RecipientUserID:       &memberID,
 		Responsibility:        "Role",
 		Percent:               40,
 		AppliesAfterMandatory: false,
@@ -434,6 +444,7 @@ func TestCreateRuleRejectsPercentOverflowInSameLevel(t *testing.T) {
 
 func TestCreateRuleAllowsDifferentLevelBudget(t *testing.T) {
 	projectID := uuid.New()
+	memberID := uuid.New()
 	repo := &fakeRepo{
 		rules: []sqlc.ProfitShareRule{
 			{
@@ -445,12 +456,15 @@ func TestCreateRuleAllowsDifferentLevelBudget(t *testing.T) {
 				AppliesAfterMandatory: false,
 			},
 		},
+		members: []sqlc.ProjectMemberWithUser{
+			{UserID: memberID, FullName: "Allowed User"},
+		},
 	}
 	svc := NewService(repo)
 
 	_, err := svc.CreateRule(context.Background(), sqlc.CreateProfitShareRuleParams{
 		ProjectID:             projectID,
-		RecipientName:         "Level2 Allowed",
+		RecipientUserID:       &memberID,
 		Responsibility:        "Role",
 		Percent:               95,
 		Level:                 2,
@@ -466,6 +480,7 @@ func TestCreateRuleAllowsDifferentLevelBudget(t *testing.T) {
 
 func TestCreateRulePrependShiftsExistingLevels(t *testing.T) {
 	projectID := uuid.New()
+	memberID := uuid.New()
 	repo := &fakeRepo{
 		rules: []sqlc.ProfitShareRule{
 			{ID: uuid.New(), ProjectID: projectID, RecipientName: "Level1", Responsibility: "Lead", Percent: 40, Level: 1},
@@ -473,14 +488,17 @@ func TestCreateRulePrependShiftsExistingLevels(t *testing.T) {
 			{ID: uuid.New(), ProjectID: projectID, RecipientName: "Level3", Responsibility: "QA", Percent: 20, Level: 3, AppliesAfterMandatory: true},
 		},
 		project: sqlc.Project{ID: projectID, CurrencyCode: "EUR"},
+		members: []sqlc.ProjectMemberWithUser{
+			{UserID: memberID, FullName: "Prepended User"},
+		},
 	}
 	svc := NewService(repo)
 
 	created, err := svc.CreateRulePrepend(context.Background(), sqlc.CreateProfitShareRuleParams{
-		ProjectID:      projectID,
-		RecipientName:  "Prepended",
-		Responsibility: "Producer",
-		Percent:        15,
+		ProjectID:       projectID,
+		RecipientUserID: &memberID,
+		Responsibility:  "Producer",
+		Percent:         15,
 	})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -504,6 +522,7 @@ func TestCreateRulePrependShiftsExistingLevels(t *testing.T) {
 
 func TestCreateRuleRejectsSkippedLevels(t *testing.T) {
 	projectID := uuid.New()
+	memberID := uuid.New()
 	repo := &fakeRepo{
 		rules: []sqlc.ProfitShareRule{
 			{
@@ -515,15 +534,18 @@ func TestCreateRuleRejectsSkippedLevels(t *testing.T) {
 				Level:          1,
 			},
 		},
+		members: []sqlc.ProjectMemberWithUser{
+			{UserID: memberID, FullName: "Skip User"},
+		},
 	}
 	svc := NewService(repo)
 
 	_, err := svc.CreateRule(context.Background(), sqlc.CreateProfitShareRuleParams{
-		ProjectID:      projectID,
-		RecipientName:  "Skip to level 3",
-		Responsibility: "Role",
-		Percent:        10,
-		Level:          3,
+		ProjectID:       projectID,
+		RecipientUserID: &memberID,
+		Responsibility:  "Role",
+		Percent:         10,
+		Level:           3,
 	})
 	if err == nil {
 		t.Fatal("expected skipped level error, got nil")
@@ -574,6 +596,7 @@ func TestListRulesNormalizesLevelsToContiguousSequence(t *testing.T) {
 
 func TestCreateRuleRejectsHigherLevelWhenPreviousIsFull(t *testing.T) {
 	projectID := uuid.New()
+	memberID := uuid.New()
 	repo := &fakeRepo{
 		rules: []sqlc.ProfitShareRule{
 			{
@@ -585,15 +608,18 @@ func TestCreateRuleRejectsHigherLevelWhenPreviousIsFull(t *testing.T) {
 				Level:          1,
 			},
 		},
+		members: []sqlc.ProjectMemberWithUser{
+			{UserID: memberID, FullName: "Blocked User"},
+		},
 	}
 	svc := NewService(repo)
 
 	_, err := svc.CreateRule(context.Background(), sqlc.CreateProfitShareRuleParams{
-		ProjectID:      projectID,
-		RecipientName:  "Blocked",
-		Responsibility: "Role",
-		Percent:        10,
-		Level:          2,
+		ProjectID:       projectID,
+		RecipientUserID: &memberID,
+		Responsibility:  "Role",
+		Percent:         10,
+		Level:           2,
 	})
 	if err == nil {
 		t.Fatal("expected next level blocked error, got nil")
@@ -605,15 +631,20 @@ func TestCreateRuleRejectsHigherLevelWhenPreviousIsFull(t *testing.T) {
 
 func TestCreateRuleRejectsLevelAboveMax(t *testing.T) {
 	projectID := uuid.New()
-	repo := &fakeRepo{}
+	memberID := uuid.New()
+	repo := &fakeRepo{
+		members: []sqlc.ProjectMemberWithUser{
+			{UserID: memberID, FullName: "High Level User"},
+		},
+	}
 	svc := NewService(repo)
 
 	_, err := svc.CreateRule(context.Background(), sqlc.CreateProfitShareRuleParams{
-		ProjectID:      projectID,
-		RecipientName:  "Too high",
-		Responsibility: "Role",
-		Percent:        10,
-		Level:          MaxProfitShareLevel + 1,
+		ProjectID:       projectID,
+		RecipientUserID: &memberID,
+		Responsibility:  "Role",
+		Percent:         10,
+		Level:           MaxProfitShareLevel + 1,
 	})
 	if err == nil {
 		t.Fatal("expected invalid level error, got nil")
@@ -736,27 +767,176 @@ func TestPreviewAssignsResidualToProjectAdministrator(t *testing.T) {
 
 func TestCreateRuleDefaultsCurrencyToProjectBase(t *testing.T) {
 	projectID := uuid.New()
+	memberID := uuid.New()
 	repo := &fakeRepo{
 		project: sqlc.Project{
 			ID:           projectID,
 			Name:         "Demo",
 			CurrencyCode: "EUR",
 		},
+		members: []sqlc.ProjectMemberWithUser{
+			{UserID: memberID, FullName: "Bob"},
+		},
 	}
 	svc := NewService(repo)
 
 	_, err := svc.CreateRule(context.Background(), sqlc.CreateProfitShareRuleParams{
-		ProjectID:      projectID,
-		RecipientName:  "Bob",
-		Responsibility: "Artist",
-		Percent:        10,
-		Level:          1,
+		ProjectID:       projectID,
+		RecipientUserID: &memberID,
+		Responsibility:  "Artist",
+		Percent:         10,
+		Level:           1,
 	})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 	if repo.lastCreate.CurrencyCode != "EUR" {
 		t.Fatalf("expected default currency EUR, got %s", repo.lastCreate.CurrencyCode)
+	}
+}
+
+func TestCreateRuleRejectsMissingRecipientUser(t *testing.T) {
+	projectID := uuid.New()
+	svc := NewService(&fakeRepo{
+		project: sqlc.Project{ID: projectID, CurrencyCode: "EUR"},
+	})
+
+	_, err := svc.CreateRule(context.Background(), sqlc.CreateProfitShareRuleParams{
+		ProjectID:      projectID,
+		Responsibility: "Producer",
+		Percent:        10,
+		Level:          1,
+	})
+	if !errors.Is(err, ErrRecipientUserRequired) {
+		t.Fatalf("expected ErrRecipientUserRequired, got %v", err)
+	}
+}
+
+func TestCreateRuleDerivesRecipientNameFromLinkedMember(t *testing.T) {
+	projectID := uuid.New()
+	memberID := uuid.New()
+	repo := &fakeRepo{
+		project: sqlc.Project{ID: projectID, CurrencyCode: "EUR"},
+		members: []sqlc.ProjectMemberWithUser{
+			{
+				UserID:    memberID,
+				FirstName: "Alice",
+				LastName:  "Brown",
+				FullName:  "Ignored Full Name",
+				Nickname:  "aliceb",
+				Email:     "alice@example.com",
+			},
+		},
+	}
+	svc := NewService(repo)
+
+	_, err := svc.CreateRule(context.Background(), sqlc.CreateProfitShareRuleParams{
+		ProjectID:       projectID,
+		RecipientUserID: &memberID,
+		Responsibility:  "Artist",
+		Percent:         15,
+		Level:           1,
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if repo.lastCreate.RecipientName != "Alice Brown" {
+		t.Fatalf("expected derived recipient name 'Alice Brown', got %q", repo.lastCreate.RecipientName)
+	}
+}
+
+func TestPreviewForUserIncludesViewerCurrencyEquivalent(t *testing.T) {
+	projectID := uuid.New()
+	viewerID := uuid.New()
+	recipientID := uuid.New()
+	repo := &fakeRepo{
+		summary: sqlc.FinanceSummary{
+			IncomeTotal: 1000,
+		},
+		project: sqlc.Project{
+			ID:           projectID,
+			CurrencyCode: "EUR",
+		},
+		rules: []sqlc.ProfitShareRule{
+			{
+				ID:              uuid.New(),
+				ProjectID:       projectID,
+				RecipientUserID: &recipientID,
+				RecipientName:   "Alice Brown",
+				Responsibility:  "Artist",
+				CurrencyCode:    "EUR",
+				Percent:         10,
+				Level:           1,
+			},
+		},
+		users: map[uuid.UUID]sqlc.User{
+			viewerID:    {ID: viewerID, DefaultCurrencyCode: "USD"},
+			recipientID: {ID: recipientID, DefaultCurrencyCode: "EUR"},
+		},
+		currencyRate: map[string]sqlc.CurrencyRate{
+			"EUR_USD": {FromCurrencyCode: "EUR", ToCurrencyCode: "USD", Rate: 1.2},
+		},
+	}
+
+	svc := NewService(repo)
+	preview, err := svc.PreviewForUser(context.Background(), projectID, viewerID)
+	if err != nil {
+		t.Fatalf("preview failed: %v", err)
+	}
+	if preview.ViewerCurrencyCode != "USD" {
+		t.Fatalf("expected viewer currency USD, got %q", preview.ViewerCurrencyCode)
+	}
+	if len(preview.Items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(preview.Items))
+	}
+	if preview.Items[0].ViewerCurrencyCode != "USD" {
+		t.Fatalf("expected item viewer currency USD, got %q", preview.Items[0].ViewerCurrencyCode)
+	}
+	if preview.Items[0].ViewerAmountConverted == nil || *preview.Items[0].ViewerAmountConverted != 120 {
+		t.Fatalf("expected viewer converted amount 120, got %+v", preview.Items[0].ViewerAmountConverted)
+	}
+}
+
+func TestPreviewForUserGracefullyHandlesMissingViewerConversion(t *testing.T) {
+	projectID := uuid.New()
+	viewerID := uuid.New()
+	recipientID := uuid.New()
+	repo := &fakeRepo{
+		summary: sqlc.FinanceSummary{
+			IncomeTotal: 1000,
+		},
+		project: sqlc.Project{
+			ID:           projectID,
+			CurrencyCode: "EUR",
+		},
+		rules: []sqlc.ProfitShareRule{
+			{
+				ID:              uuid.New(),
+				ProjectID:       projectID,
+				RecipientUserID: &recipientID,
+				RecipientName:   "Alice Brown",
+				Responsibility:  "Artist",
+				CurrencyCode:    "EUR",
+				Percent:         10,
+				Level:           1,
+			},
+		},
+		users: map[uuid.UUID]sqlc.User{
+			viewerID:    {ID: viewerID, DefaultCurrencyCode: "USD"},
+			recipientID: {ID: recipientID, DefaultCurrencyCode: "EUR"},
+		},
+	}
+
+	svc := NewService(repo)
+	preview, err := svc.PreviewForUser(context.Background(), projectID, viewerID)
+	if err != nil {
+		t.Fatalf("preview should not fail without viewer conversion rate, got %v", err)
+	}
+	if preview.ViewerCurrencyCode != "USD" {
+		t.Fatalf("expected viewer currency USD, got %q", preview.ViewerCurrencyCode)
+	}
+	if preview.Items[0].ViewerAmountConverted != nil {
+		t.Fatalf("expected no viewer converted amount when rate is missing, got %+v", *preview.Items[0].ViewerAmountConverted)
 	}
 }
 
@@ -967,5 +1147,163 @@ func TestMyIncomeForecastProjectionRespectsProfitShareRules(t *testing.T) {
 	}
 	if got.ForecastProjection.Yhat.UserAmount != 440 {
 		t.Fatalf("expected yhat user amount 440 with 20%% tax and 50%% share, got %.2f", got.ForecastProjection.Yhat.UserAmount)
+	}
+}
+
+func TestTeamIncomeForecastIncludesCurrentAndScenarioAmounts(t *testing.T) {
+	projectID := uuid.New()
+	pmID := uuid.New()
+	teamID := uuid.New()
+	runID := uuid.New()
+	createdAt := time.Now().UTC()
+
+	repo := &fakeRepo{
+		summary: sqlc.FinanceSummary{
+			IncomeTotal:   1000,
+			ExpensesTotal: 100,
+		},
+		project: sqlc.Project{
+			ID:           projectID,
+			CurrencyCode: "EUR",
+		},
+		members: []sqlc.ProjectMemberWithUser{
+			{
+				UserID:              pmID,
+				Role:                "PM",
+				FullName:            "Admin One",
+				DefaultCurrencyCode: "RUB",
+				Email:               "pm@example.com",
+			},
+			{
+				UserID:              teamID,
+				Role:                "TEAM",
+				FullName:            "Artist Two",
+				DefaultCurrencyCode: "USD",
+				Email:               "team@example.com",
+			},
+		},
+		rules: []sqlc.ProfitShareRule{
+			{
+				ID:              uuid.New(),
+				ProjectID:       projectID,
+				RecipientUserID: &teamID,
+				RecipientName:   "Artist Two",
+				Responsibility:  "Artist",
+				CurrencyCode:    "EUR",
+				Percent:         50,
+				Level:           1,
+			},
+		},
+		forecastRun: sqlc.ForecastRun{
+			ID:        runID,
+			CreatedAt: createdAt,
+		},
+		forecastPoints: []sqlc.ForecastPoint{
+			{P10: 100, Yhat: 300, P90: 500},
+		},
+		currencyRate: map[string]sqlc.CurrencyRate{
+			"EUR_USD": {FromCurrencyCode: "EUR", ToCurrencyCode: "USD", Rate: 2},
+			"EUR_RUB": {FromCurrencyCode: "EUR", ToCurrencyCode: "RUB", Rate: 100},
+		},
+	}
+
+	svc := NewService(repo)
+	got, err := svc.TeamIncomeForecast(context.Background(), projectID)
+	if err != nil {
+		t.Fatalf("TeamIncomeForecast returned error: %v", err)
+	}
+
+	if !got.ForecastAvailable {
+		t.Fatal("expected forecast to be available")
+	}
+	if got.LatestForecastRunID == nil || *got.LatestForecastRunID != runID {
+		t.Fatalf("expected latest forecast run id %s, got %+v", runID, got.LatestForecastRunID)
+	}
+	if len(got.Members) != 2 {
+		t.Fatalf("expected 2 member rows, got %d", len(got.Members))
+	}
+
+	var teamRow *TeamIncomeForecastMember
+	for i := range got.Members {
+		if got.Members[i].UserID == teamID {
+			teamRow = &got.Members[i]
+			break
+		}
+	}
+	if teamRow == nil {
+		t.Fatal("expected team member row to be present")
+	}
+	if teamRow.CurrentEarned.ProjectAmount != 450 {
+		t.Fatalf("expected current project amount 450, got %.2f", teamRow.CurrentEarned.ProjectAmount)
+	}
+	if teamRow.CurrentEarned.UserAmount != 900 {
+		t.Fatalf("expected current user amount 900 USD, got %.2f", teamRow.CurrentEarned.UserAmount)
+	}
+	if teamRow.PoorScenario == nil || teamRow.PoorScenario.ProjectAmount != 500 {
+		t.Fatalf("expected poor scenario project amount 500, got %+v", teamRow.PoorScenario)
+	}
+	if teamRow.AverageScenario == nil || teamRow.AverageScenario.ProjectAmount != 600 {
+		t.Fatalf("expected average scenario project amount 600, got %+v", teamRow.AverageScenario)
+	}
+	if teamRow.GoodScenario == nil || teamRow.GoodScenario.ProjectAmount != 700 {
+		t.Fatalf("expected good scenario project amount 700, got %+v", teamRow.GoodScenario)
+	}
+	if got.ScenarioModel.Poor.ForecastKey != "p10" || got.ScenarioModel.Average.ForecastKey != "yhat" || got.ScenarioModel.Good.ForecastKey != "p90" {
+		t.Fatalf("unexpected scenario model: %+v", got.ScenarioModel)
+	}
+}
+
+func TestTeamIncomeForecastReturnsCurrentAmountsWithoutForecastRun(t *testing.T) {
+	projectID := uuid.New()
+	memberID := uuid.New()
+
+	repo := &fakeRepo{
+		summary: sqlc.FinanceSummary{
+			IncomeTotal:   1000,
+			ExpensesTotal: 0,
+		},
+		project: sqlc.Project{
+			ID:           projectID,
+			CurrencyCode: "EUR",
+		},
+		members: []sqlc.ProjectMemberWithUser{
+			{
+				UserID:              memberID,
+				Role:                "TEAM",
+				FullName:            "Only Member",
+				DefaultCurrencyCode: "EUR",
+				Email:               "member@example.com",
+			},
+		},
+		rules: []sqlc.ProfitShareRule{
+			{
+				ID:              uuid.New(),
+				ProjectID:       projectID,
+				RecipientUserID: &memberID,
+				RecipientName:   "Only Member",
+				Responsibility:  "Artist",
+				CurrencyCode:    "EUR",
+				Percent:         10,
+				Level:           1,
+			},
+		},
+	}
+
+	svc := NewService(repo)
+	got, err := svc.TeamIncomeForecast(context.Background(), projectID)
+	if err != nil {
+		t.Fatalf("TeamIncomeForecast returned error: %v", err)
+	}
+	if got.ForecastAvailable {
+		t.Fatal("expected forecast to be unavailable without latest run")
+	}
+	if len(got.Members) != 1 {
+		t.Fatalf("expected 1 member row, got %d", len(got.Members))
+	}
+	if got.Members[0].CurrentEarned.ProjectAmount != 100 {
+		t.Fatalf("expected current project amount 100, got %.2f", got.Members[0].CurrentEarned.ProjectAmount)
+	}
+	if got.Members[0].PoorScenario != nil || got.Members[0].AverageScenario != nil || got.Members[0].GoodScenario != nil {
+		t.Fatalf("expected no forecast scenarios without run, got %+v", got.Members[0])
 	}
 }

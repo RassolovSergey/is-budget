@@ -6,11 +6,12 @@ import { useEffect, useState } from "react";
 import { AppShell } from "../../components/AppShell";
 import { useLocale } from "../../components/LocaleProvider";
 import { apiRequest } from "../../lib/api";
-import { dispatchInvitesUpdated, dispatchProjectsUpdated } from "../../lib/appEvents";
+import { dispatchInvitesUpdated, dispatchProjectsUpdated, INVITES_UPDATED_EVENT } from "../../lib/appEvents";
 import { toIntlLocale } from "../../lib/i18n";
 import { projectRoleView } from "../../lib/projectRoles";
 import type { IncomingProjectInvite } from "../../lib/types";
 import { useAuthGuard } from "../../lib/useAuthGuard";
+import { useLiveRefresh } from "../../lib/useLiveRefresh";
 
 export default function NotificationsPage() {
   const { t, locale } = useLocale();
@@ -37,7 +38,13 @@ export default function NotificationsPage() {
     if (ready) {
       load();
     }
-  }, [ready]);
+  }, [ready, token]);
+
+  useLiveRefresh(load, {
+    enabled: ready && !!token,
+    intervalMs: 7000,
+    eventNames: [INVITES_UPDATED_EVENT]
+  });
 
   async function acceptInvite(inviteToken: string) {
     if (!token) return;

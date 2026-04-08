@@ -1,8 +1,7 @@
 package payout
 
 type upsertRuleRequest struct {
-	RecipientUserID       string  `json:"recipient_user_id" validate:"omitempty,uuid"`
-	RecipientName         string  `json:"recipient_name" validate:"required,min=2,max=120"`
+	RecipientUserID       string  `json:"recipient_user_id" validate:"required,uuid"`
 	Responsibility        string  `json:"responsibility" validate:"required,min=2,max=160"`
 	CurrencyCode          string  `json:"currency_code" validate:"omitempty,oneof=EUR USD RUB"`
 	Percent               float64 `json:"percent" validate:"required,gte=0,lte=100"`

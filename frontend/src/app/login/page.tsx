@@ -82,10 +82,12 @@ export default function LoginPage() {
     e.preventDefault();
     setError("");
     setLoading(true);
+    const normalizedEmail = email.trim();
+    setEmail(normalizedEmail);
     try {
       const result = await apiRequest<LoginResponse>("/auth/login", {
         method: "POST",
-        body: { email, password }
+        body: { email: normalizedEmail, password }
       });
       setToken(result.token);
       router.push(resolveNextPath());
@@ -175,7 +177,11 @@ export default function LoginPage() {
               <form className="grid auth-form-grid" onSubmit={submitLogin}>
                 <label>
                   {t("login.email")}
-                  <input value={email} onChange={(e) => setEmail(e.target.value)} />
+                  <input
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    onBlur={() => setEmail((prev) => prev.trim())}
+                  />
                 </label>
                 <PasswordField label={t("login.password")} value={password} onChange={setPassword} />
                 {error && <p style={{ color: "#bc4749", margin: 0 }}>{error}</p>}

@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 
 import { AppShell } from "../../../../components/AppShell";
@@ -74,11 +75,12 @@ export default function ActualExpensesPage() {
   }, [ready, id, token]);
 
   const tr = (ru: string, en: string) => (locale === "en" ? en : ru);
+  const legacyReadOnly = true;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!(project?.current_user_role === "PM" || project?.current_user_role === "ANALYST")) {
-      setError(tr("Недостаточно прав для изменения расходов.", "Not enough permissions to edit expenses."));
+    if (legacyReadOnly) {
+      setError(tr("Этот legacy-раздел доступен только для просмотра. Новые списания теперь настраиваются через «Финансовый конвейер».", "This legacy section is read-only. Configure new deductions through Finance Pipeline."));
       return;
     }
     setError("");
@@ -108,8 +110,8 @@ export default function ActualExpensesPage() {
   }
 
   async function onDelete(expenseId: string) {
-    if (!(project?.current_user_role === "PM" || project?.current_user_role === "ANALYST")) {
-      setError(tr("Недостаточно прав для изменения расходов.", "Not enough permissions to edit expenses."));
+    if (legacyReadOnly) {
+      setError(tr("Этот legacy-раздел доступен только для просмотра. Новые списания теперь настраиваются через «Финансовый конвейер».", "This legacy section is read-only. Configure new deductions through Finance Pipeline."));
       return;
     }
     const confirmed = await confirmAction({
@@ -134,7 +136,7 @@ export default function ActualExpensesPage() {
 
   if (!ready || !project) return null;
   const projectCurrency = project.currency_code;
-  const canFinanceWrite = project.current_user_role === "PM" || project.current_user_role === "ANALYST";
+  const canFinanceWrite = false;
   const totalSpent = items.reduce((sum, item) => sum + item.amount, 0);
   const categoryCount = new Set(items.map((item) => item.category.trim().toLowerCase()).filter(Boolean)).size;
   const nearestPayment = sortedItems[0]?.paid_at?.slice(0, 10) || "";
@@ -145,6 +147,19 @@ export default function ActualExpensesPage() {
     <AppShell title={project.name} className="actual-expenses-shell">
       <ProjectNav projectId={id} />
       {error && <p style={{ color: "#bc4749" }}>{error}</p>}
+
+      <section className="card legacy-route-note">
+        <strong>{tr("Legacy-раздел расходов", "Legacy expense section")}</strong>
+        <p>
+          {tr(
+            "Эта страница сохранена для совместимости со старыми данными. Основную настройку денежного потока и новых списаний теперь ведите через «Финансовый конвейер».",
+            "This page is kept for compatibility with older data. Use Finance Pipeline as the main place for configuring money flow and new deductions."
+          )}
+        </p>
+        <Link href={`/projects/${id}/finance-pipeline`} className="inline-link">
+          {tr("Открыть финансовый конвейер", "Open Finance Pipeline")}
+        </Link>
+      </section>
 
       <section className="card expenses-overview-card">
         <div className="expenses-overview-head">

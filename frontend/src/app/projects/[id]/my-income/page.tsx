@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 
@@ -8,16 +9,20 @@ import { AppShell } from "../../../../components/AppShell";
 import { useLocale } from "../../../../components/LocaleProvider";
 import { ProjectNav } from "../../../../components/ProjectNav";
 import { apiRequest } from "../../../../lib/api";
+import { displayHumanName } from "../../../../lib/displayName";
+import { forecastScenarioViews } from "../../../../lib/forecastScenarios";
 import { money } from "../../../../lib/format";
-import type { MyIncomeResponse, Project } from "../../../../lib/types";
+import { projectRoleView } from "../../../../lib/projectRoles";
+import type { MyIncomeResponse, Project, TeamIncomeAmount, TeamIncomeForecastResponse } from "../../../../lib/types";
 import { useAuthGuard } from "../../../../lib/useAuthGuard";
 
 export default function MyIncomePage() {
   const { id } = useParams<{ id: string }>();
-  const { locale } = useLocale();
+  const { locale, t } = useLocale();
   const { token, ready } = useAuthGuard();
   const [project, setProject] = useState<Project | null>(null);
   const [income, setIncome] = useState<MyIncomeResponse | null>(null);
+  const [teamForecast, setTeamForecast] = useState<TeamIncomeForecastResponse | null>(null);
   const [error, setError] = useState("");
   const [activeSlice, setActiveSlice] = useState(0);
 
@@ -30,6 +35,12 @@ export default function MyIncomePage() {
       ]);
       setProject(projectResp);
       setIncome(myIncomeResp);
+      if (projectResp.current_user_role === "PM") {
+        const teamForecastResp = await apiRequest<TeamIncomeForecastResponse>(`/projects/${id}/team-income-forecast`, { token });
+        setTeamForecast(teamForecastResp);
+      } else {
+        setTeamForecast(null);
+      }
     } catch (err) {
       setError((err as Error).message);
     }
@@ -88,6 +99,18 @@ export default function MyIncomePage() {
     return rows.filter((row) => row.value > 0);
   }, [income, locale]);
   const forecastProjection = income?.forecast_projection || null;
+  const forecastScenarios = forecastScenarioViews(locale);
+  const renderAmountCell = (amount?: TeamIncomeAmount | null) => {
+    if (!amount) {
+      return <span className="subtle">{tr("Нет прогноза", "No forecast")}</span>;
+    }
+    return (
+      <div className="money-stack">
+        <strong>{money(amount.project_amount, amount.project_currency_code)}</strong>
+        <span>{money(amount.user_amount, amount.user_currency_code)}</span>
+      </div>
+    );
+  };
 
   if (!ready || !project || !income) return null;
 
@@ -95,6 +118,29 @@ export default function MyIncomePage() {
     <AppShell title={project.name} className="my-income-shell">
       <ProjectNav projectId={id} />
       {error && <p style={{ color: "var(--danger)" }}>{error}</p>}
+
+      {isAdministrator && (
+        <section className="card my-income-guidance-card">
+          <div>
+            <span className="shell-eyebrow">{tr("Роль страницы", "Page role")}</span>
+            <h2 className="title">{tr("Здесь вы проверяете итоговые суммы", "This page is for reviewing final amounts")}</h2>
+            <p className="subtle">
+              {tr(
+                "Настройка денежного потока и сохранение снимков находятся в финансовом конвейере. Здесь удобнее сверять личный итог, структуру суммы и прогноз выплат команде.",
+                "Money-flow setup and snapshots live in Finance Pipeline. This page is best for reviewing your final amount, the amount structure, and team payout forecasts."
+              )}
+            </p>
+          </div>
+          <div className="my-income-guidance-actions">
+            <Link href={`/projects/${id}/finance-pipeline`} className="button-like">
+              {tr("Открыть финансовый конвейер", "Open Finance Pipeline")}
+            </Link>
+            <Link href={`/projects/${id}/campaign-lifecycle`} className="button-like secondary">
+              {tr("Проверить импорт и жизненный цикл", "Review import and lifecycle")}
+            </Link>
+          </div>
+        </section>
+      )}
 
       {!isAdministrator && (
         <section className="card my-income-panel">
@@ -122,7 +168,7 @@ export default function MyIncomePage() {
                 </div>
               </article>
               <article className="my-income-stat-card">
-                <span>{tr("Правил привязано", "Linked rules")}</span>
+                <span>{tr("Строк дохода", "Income lines")}</span>
                 <strong>{income.items.length}</strong>
               </article>
             </div>
@@ -160,8 +206,8 @@ export default function MyIncomePage() {
                   <tr>
                     <td colSpan={6} className="subtle">
                       {tr(
-                        "Для вашего аккаунта пока нет привязанных выплат в правилах распределения.",
-                        "There are no payouts linked to your account in profit-sharing rules yet."
+                        "Для вашего аккаунта пока нет рассчитанных выплат в текущей конфигурации проекта.",
+                        "There are no calculated payouts for your account in the current project setup yet."
                       )}
                     </td>
                   </tr>
@@ -228,7 +274,7 @@ export default function MyIncomePage() {
                   <strong>{money(income.available_for_sharing, income.project_currency_code)}</strong>
                 </div>
                 <div className="my-income-breakdown-row">
-                  <span>{tr("Распределено по правилам", "Distributed by rules")}</span>
+                  <span>{tr("Распределено по конвейеру", "Distributed by pipeline")}</span>
                   <strong>{money(income.distributed_amount, income.project_currency_code)}</strong>
                 </div>
                 <div className="my-income-breakdown-row highlight">
@@ -295,8 +341,8 @@ export default function MyIncomePage() {
                 <h2>{money(forecastProjection.yhat.user_amount, income.user_currency_code)}</h2>
                 <p className="subtle" style={{ margin: 0 }}>
                   {tr(
-                    "На основе последнего запуска прогноза и текущих правил налогов/распределения.",
-                    "Based on the latest forecast run and the current tax/profit-sharing rules."
+                    "Оценка по последнему прогнозу и текущей конфигурации проекта.",
+                    "Estimate based on the latest forecast and current project setup."
                   )}
                 </p>
                 <p className="subtle" style={{ margin: "4px 0 0" }}>
@@ -318,37 +364,114 @@ export default function MyIncomePage() {
 
           {forecastProjection ? (
             <div className="my-income-forecast-range">
-              {[
-                {
-                  label: tr("Плохой вариант", "Low case"),
-                  value: forecastProjection.p10,
-                },
-                {
-                  label: tr("Средний вариант", "Expected case"),
-                  value: forecastProjection.yhat,
-                },
-                {
-                  label: tr("Хороший вариант", "Best case"),
-                  value: forecastProjection.p90,
-                }
-              ].map((scenario) => (
+              {forecastScenarios.map((scenario) => {
+                const value =
+                  scenario.key === "poor"
+                    ? forecastProjection.p10
+                    : scenario.key === "average"
+                      ? forecastProjection.yhat
+                      : forecastProjection.p90;
+                return (
                 <article key={scenario.label} className="my-income-stat-card">
                   <span>{scenario.label}</span>
-                  <strong>{money(scenario.value.user_amount, income.user_currency_code)}</strong>
+                  <strong>{money(value.user_amount, income.user_currency_code)}</strong>
                   <p className="subtle" style={{ margin: 0 }}>
-                    {tr("В валюте проекта", "In project currency")}: {money(scenario.value.project_amount, income.project_currency_code)}
+                    {tr("В валюте проекта", "In project currency")}: {money(value.project_amount, income.project_currency_code)}
                   </p>
                 </article>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className="ledger-empty-state">
               <strong>{tr("Нет данных прогноза", "No forecast data")}</strong>
-              <span>{tr("После запуска прогноза здесь появится ожидаемый персональный доход по сценариям p10 / yhat / p90.", "After running a forecast, your projected personal income for p10 / yhat / p90 scenarios will appear here.")}</span>
+              <span>{tr("После запуска прогноза здесь появятся оценки личного дохода по сценариям.", "After running a forecast, your personal income scenarios will appear here.")}</span>
             </div>
           )}
         </div>
       </section>
+
+      {isAdministrator && teamForecast && (
+        <section className="card my-income-panel">
+          <div className="my-income-forecast-block">
+            <div className="my-income-forecast-head">
+              <p className="shell-eyebrow">{tr("Прогноз выплат команде", "Team payout forecast")}</p>
+              <h2>{tr("Сценарии выплат по всем участникам", "Member payout scenarios")}</h2>
+              <p className="subtle" style={{ margin: 0 }}>
+                {tr(
+                  "Сравните текущие суммы и прогнозные выплаты участников в трёх сценариях.",
+                  "Compare current amounts and projected member payouts across three scenarios."
+                )}
+              </p>
+              <p className="subtle" style={{ margin: "4px 0 0" }}>
+                {tr("Настройка денежного потока и сохранение снимков теперь находятся в ", "Money-flow setup and snapshots now live in ")}
+                <Link href={`/projects/${id}/finance-pipeline`}>{tr("финансовом конвейере", "Finance Pipeline")}</Link>
+                .
+              </p>
+              <p className="subtle" style={{ margin: "4px 0 0" }}>
+                {tr(
+                  "Эта таблица нужна для сверки ожидаемых выплат по участникам, а не для настройки самих правил движения денег.",
+                  "Use this table to review expected member payouts, not to configure the money-flow rules themselves."
+                )}
+              </p>
+              <p className="subtle" style={{ margin: "4px 0 0" }}>
+                {teamForecast.forecast_available && teamForecast.latest_forecast_created_at
+                  ? tr(
+                      `Последний запуск прогноза: ${new Date(teamForecast.latest_forecast_created_at).toLocaleDateString(numberLocale)}.`,
+                      `Latest forecast run: ${new Date(teamForecast.latest_forecast_created_at).toLocaleDateString(numberLocale)}.`
+                    )
+                  : tr(
+                      "Текущие суммы показаны уже сейчас, но сценарии появятся после запуска прогноза.",
+                      "Current earned amounts are available now, but scenario estimates appear only after a forecast run."
+                    )}
+              </p>
+            </div>
+
+            <div className="table-surface">
+              <table>
+                <thead>
+                  <tr>
+                    <th>{tr("Участник", "Member")}</th>
+                    <th>{tr("Роль", "Role")}</th>
+                    <th>{tr("Текущий доход", "Current earned")}</th>
+                    {forecastScenarios.map((scenario) => (
+                      <th key={scenario.key}>{scenario.label}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {teamForecast.members.map((member) => {
+                    const roleView = projectRoleView(t, member.role);
+                    return (
+                      <tr key={member.user_id}>
+                        <td>{displayHumanName(member, tr("Без имени", "Unnamed member"))}</td>
+                        <td>{roleView.title || member.role}</td>
+                        <td>{renderAmountCell(member.current_earned)}</td>
+                        {forecastScenarios.map((scenario) => {
+                          const amount =
+                            scenario.key === "poor"
+                              ? member.poor_scenario
+                              : scenario.key === "average"
+                                ? member.average_scenario
+                                : member.good_scenario;
+                          return <td key={scenario.key}>{renderAmountCell(amount)}</td>;
+                        })}
+                      </tr>
+                    );
+                  })}
+                  {!teamForecast.members.length && (
+                    <tr>
+                      <td colSpan={6} className="subtle">
+                        {tr("В проекте пока нет участников для расчёта.", "There are no project members to forecast yet.")}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      )}
     </AppShell>
   );
 }

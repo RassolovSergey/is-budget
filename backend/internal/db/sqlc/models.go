@@ -78,6 +78,47 @@ type ActualIncomeDaily struct {
 	UpdatedAt  time.Time `db:"updated_at" json:"updated_at"`
 }
 
+type AllocationBlock struct {
+	ID         uuid.UUID `db:"id" json:"id"`
+	ProjectID  uuid.UUID `db:"project_id" json:"project_id"`
+	Name       string    `db:"name" json:"name"`
+	Type       string    `db:"type" json:"type"`
+	OrderIndex int32     `db:"order_index" json:"order_index"`
+	Enabled    bool      `db:"enabled" json:"enabled"`
+	ValueType  string    `db:"value_type" json:"value_type"`
+	Value      float64   `db:"value" json:"value"`
+	AppliesTo  string    `db:"applies_to" json:"applies_to"`
+	CreatedAt  time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt  time.Time `db:"updated_at" json:"updated_at"`
+	LevelIndex int32     `db:"level_index" json:"level_index"`
+}
+
+type CampaignConfig struct {
+	ID                     uuid.UUID  `db:"id" json:"id"`
+	ProjectID              uuid.UUID  `db:"project_id" json:"project_id"`
+	CurrentStage           string     `db:"current_stage" json:"current_stage"`
+	LaunchAt               *time.Time `db:"launch_at" json:"launch_at"`
+	LatePledgesEnabled     bool       `db:"late_pledges_enabled" json:"late_pledges_enabled"`
+	PledgeOverTimeEnabled  bool       `db:"pledge_over_time_enabled" json:"pledge_over_time_enabled"`
+	PledgeManagerEnabled   bool       `db:"pledge_manager_enabled" json:"pledge_manager_enabled"`
+	DigitalOnlyFulfillment bool       `db:"digital_only_fulfillment" json:"digital_only_fulfillment"`
+	CreatedAt              time.Time  `db:"created_at" json:"created_at"`
+	UpdatedAt              time.Time  `db:"updated_at" json:"updated_at"`
+}
+
+type CampaignStageSnapshot struct {
+	ID                  uuid.UUID `db:"id" json:"id"`
+	ProjectID           uuid.UUID `db:"project_id" json:"project_id"`
+	Stage               string    `db:"stage" json:"stage"`
+	CreatedBy           uuid.UUID `db:"created_by" json:"created_by"`
+	CreatedByName       string    `db:"created_by_name" json:"created_by_name"`
+	CreatedAt           time.Time `db:"created_at" json:"created_at"`
+	FollowersCount      *int32    `db:"followers_count" json:"followers_count"`
+	Notes               *string   `db:"notes" json:"notes"`
+	GrossAmountSnapshot *float64  `db:"gross_amount_snapshot" json:"gross_amount_snapshot"`
+	TeamPoolSnapshot    *float64  `db:"team_pool_snapshot" json:"team_pool_snapshot"`
+}
+
 type ContributionLedger struct {
 	ID        uuid.UUID `db:"id" json:"id"`
 	ProjectID uuid.UUID `db:"project_id" json:"project_id"`
@@ -146,6 +187,39 @@ type HistoricalCampaignDailyMetric struct {
 	UpdatedAt    time.Time `db:"updated_at" json:"updated_at"`
 }
 
+type ImportRecord struct {
+	ID               uuid.UUID  `db:"id" json:"id"`
+	RunID            uuid.UUID  `db:"run_id" json:"run_id"`
+	RowNumber        int32      `db:"row_number" json:"row_number"`
+	Status           string     `db:"status" json:"status"`
+	ErrorMessage     *string    `db:"error_message" json:"error_message"`
+	PledgedAt        *time.Time `db:"pledged_at" json:"pledged_at"`
+	PledgedAmount    *float64   `db:"pledged_amount" json:"pledged_amount"`
+	BackerIdentifier *string    `db:"backer_identifier" json:"backer_identifier"`
+	RewardTier       *string    `db:"reward_tier" json:"reward_tier"`
+	CreatedAt        time.Time  `db:"created_at" json:"created_at"`
+}
+
+type ImportRun struct {
+	ID               uuid.UUID  `db:"id" json:"id"`
+	ProjectID        uuid.UUID  `db:"project_id" json:"project_id"`
+	UploadedBy       uuid.UUID  `db:"uploaded_by" json:"uploaded_by"`
+	UploadedByName   string     `db:"uploaded_by_name" json:"uploaded_by_name"`
+	ImportType       string     `db:"import_type" json:"import_type"`
+	FileName         string     `db:"file_name" json:"file_name"`
+	Status           string     `db:"status" json:"status"`
+	ErrorMessage     *string    `db:"error_message" json:"error_message"`
+	RowsProcessed    int32      `db:"rows_processed" json:"rows_processed"`
+	RowsSucceeded    int32      `db:"rows_succeeded" json:"rows_succeeded"`
+	RowsFailed       int32      `db:"rows_failed" json:"rows_failed"`
+	RowsSkipped      int32      `db:"rows_skipped" json:"rows_skipped"`
+	TotalPledged     *float64   `db:"total_pledged" json:"total_pledged"`
+	BackerCount      *int32     `db:"backer_count" json:"backer_count"`
+	RewardTiersCount *int32     `db:"reward_tiers_count" json:"reward_tiers_count"`
+	CreatedAt        time.Time  `db:"created_at" json:"created_at"`
+	CompletedAt      *time.Time `db:"completed_at" json:"completed_at"`
+}
+
 type Payout struct {
 	ID              uuid.UUID  `db:"id" json:"id"`
 	ProjectID       uuid.UUID  `db:"project_id" json:"project_id"`
@@ -157,6 +231,56 @@ type Payout struct {
 	CurrencyCode    string     `db:"currency_code" json:"currency_code"`
 	AmountConverted float64    `db:"amount_converted" json:"amount_converted"`
 	ConversionRate  float64    `db:"conversion_rate" json:"conversion_rate"`
+}
+
+type PayoutSnapshot struct {
+	ID                   uuid.UUID  `db:"id" json:"id"`
+	ProjectID            uuid.UUID  `db:"project_id" json:"project_id"`
+	CreatedBy            uuid.UUID  `db:"created_by" json:"created_by"`
+	CreatedByName        string     `db:"created_by_name" json:"created_by_name"`
+	CreatedAt            time.Time  `db:"created_at" json:"created_at"`
+	ProjectCurrencyCode  string     `db:"project_currency_code" json:"project_currency_code"`
+	GrossAmount          float64    `db:"gross_amount" json:"gross_amount"`
+	GrossAmountSource    string     `db:"gross_amount_source" json:"gross_amount_source"`
+	FinalTeamPoolAmount  float64    `db:"final_team_pool_amount" json:"final_team_pool_amount"`
+	TotalPoints          int32      `db:"total_points" json:"total_points"`
+	EligibleMembersCount int32      `db:"eligible_members_count" json:"eligible_members_count"`
+	MemberCount          int32      `db:"member_count" json:"member_count"`
+	RoundingPolicy       string     `db:"rounding_policy" json:"rounding_policy"`
+	SettlementStatus     string     `db:"settlement_status" json:"settlement_status"`
+	SettlementNote       *string    `db:"settlement_note" json:"settlement_note"`
+	ApprovedBy           *uuid.UUID `db:"approved_by" json:"approved_by"`
+	ApprovedByName       *string    `db:"approved_by_name" json:"approved_by_name"`
+	ApprovedAt           *time.Time `db:"approved_at" json:"approved_at"`
+}
+
+type PayoutSnapshotBlock struct {
+	ID              uuid.UUID  `db:"id" json:"id"`
+	SnapshotID      uuid.UUID  `db:"snapshot_id" json:"snapshot_id"`
+	SourceBlockID   *uuid.UUID `db:"source_block_id" json:"source_block_id"`
+	Name            string     `db:"name" json:"name"`
+	Type            string     `db:"type" json:"type"`
+	OrderIndex      int32      `db:"order_index" json:"order_index"`
+	ValueType       string     `db:"value_type" json:"value_type"`
+	Value           float64    `db:"value" json:"value"`
+	AppliesTo       string     `db:"applies_to" json:"applies_to"`
+	InputAmount     float64    `db:"input_amount" json:"input_amount"`
+	AllocatedAmount float64    `db:"allocated_amount" json:"allocated_amount"`
+	RemainingAmount float64    `db:"remaining_amount" json:"remaining_amount"`
+	IsTeamPool      bool       `db:"is_team_pool" json:"is_team_pool"`
+	LevelIndex      int32      `db:"level_index" json:"level_index"`
+}
+
+type PayoutSnapshotMember struct {
+	ID                  uuid.UUID  `db:"id" json:"id"`
+	SnapshotID          uuid.UUID  `db:"snapshot_id" json:"snapshot_id"`
+	UserID              *uuid.UUID `db:"user_id" json:"user_id"`
+	UserName            string     `db:"user_name" json:"user_name"`
+	TotalPoints         int32      `db:"total_points" json:"total_points"`
+	PercentageShare     float64    `db:"percentage_share" json:"percentage_share"`
+	PayoutAmount        float64    `db:"payout_amount" json:"payout_amount"`
+	CompletedNodesCount int32      `db:"completed_nodes_count" json:"completed_nodes_count"`
+	OrderIndex          int32      `db:"order_index" json:"order_index"`
 }
 
 type PlannedExpense struct {

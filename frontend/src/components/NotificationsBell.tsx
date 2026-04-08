@@ -11,6 +11,7 @@ import { toIntlLocale } from "../lib/i18n";
 import { projectRoleView } from "../lib/projectRoles";
 import { getToken } from "../lib/session";
 import type { IncomingProjectInvite } from "../lib/types";
+import { useLiveRefresh } from "../lib/useLiveRefresh";
 
 const MAX_VISIBLE_ITEMS = 6;
 
@@ -91,13 +92,11 @@ export function NotificationsBell() {
     loadInvites();
   }, []);
 
-  useEffect(() => {
-    const onUpdated = () => {
-      loadInvites();
-    };
-    window.addEventListener(INVITES_UPDATED_EVENT, onUpdated);
-    return () => window.removeEventListener(INVITES_UPDATED_EVENT, onUpdated);
-  }, []);
+  useLiveRefresh(loadInvites, {
+    enabled: true,
+    intervalMs: 7000,
+    eventNames: [INVITES_UPDATED_EVENT]
+  });
 
   useEffect(() => {
     if (!open) return;

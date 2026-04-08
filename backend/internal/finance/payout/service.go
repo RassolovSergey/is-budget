@@ -36,6 +36,7 @@ var (
 	ErrRulePercentOverflow      = errors.New("сумма процентов для уровня не может превышать 100")
 	ErrRuleNextLevelBlocked     = errors.New("невозможно создать следующий уровень: на предыдущем уровне уже распределено 100%")
 	ErrInvalidRuleCurrency      = errors.New("currency_code must be one of: EUR, USD, RUB")
+	ErrRecipientUserRequired    = errors.New("recipient_user_id is required")
 	ErrInvalidRecipientUser     = errors.New("recipient_user_id must belong to a project member")
 	ErrCurrencyRateUnavailable  = errors.New("currency rate unavailable")
 	ErrInvalidSnapshotFileName  = errors.New("invalid snapshot file name")
@@ -69,12 +70,16 @@ type PreviewItem struct {
 	CurrencyCode          string     `json:"currency_code"`
 	ConversionRate        float64    `json:"conversion_rate"`
 	PayoutAmountConverted float64    `json:"payout_amount_converted"`
+	ViewerCurrencyCode    string     `json:"viewer_currency_code,omitempty"`
+	ViewerConversionRate  *float64   `json:"viewer_conversion_rate,omitempty"`
+	ViewerAmountConverted *float64   `json:"viewer_amount_converted,omitempty"`
 }
 
 type PreviewResponse struct {
 	Summary                  FinancialSummary `json:"summary"`
 	ProjectCurrencyCode      string           `json:"project_currency_code"`
 	SecondaryCurrencyCode    string           `json:"secondary_currency_code,omitempty"`
+	ViewerCurrencyCode       string           `json:"viewer_currency_code,omitempty"`
 	TaxLevels                []TaxLevelItem   `json:"tax_levels"`
 	DistributedAmount        float64          `json:"distributed_amount"`
 	DistributedPercent       float64          `json:"distributed_percent"`
@@ -128,6 +133,47 @@ type MyIncomeForecastProjection struct {
 	P90       MyIncomeForecastScenario `json:"p90"`
 }
 
+type TeamIncomeAmount struct {
+	ProjectAmount        float64 `json:"project_amount"`
+	ProjectCurrencyCode  string  `json:"project_currency_code"`
+	UserAmount           float64 `json:"user_amount"`
+	UserCurrencyCode     string  `json:"user_currency_code"`
+	ConversionRateToUser float64 `json:"conversion_rate_to_user"`
+}
+
+type TeamIncomeScenarioDefinition struct {
+	Key         string `json:"key"`
+	Label       string `json:"label"`
+	ForecastKey string `json:"forecast_key"`
+	Description string `json:"description"`
+}
+
+type TeamIncomeScenarioModel struct {
+	Poor    TeamIncomeScenarioDefinition `json:"poor"`
+	Average TeamIncomeScenarioDefinition `json:"average"`
+	Good    TeamIncomeScenarioDefinition `json:"good"`
+}
+
+type TeamIncomeForecastMember struct {
+	UserID         uuid.UUID         `json:"user_id"`
+	FullName       string            `json:"full_name"`
+	Role           string            `json:"role"`
+	CurrentEarned  TeamIncomeAmount  `json:"current_earned"`
+	PoorScenario   *TeamIncomeAmount `json:"poor_scenario,omitempty"`
+	AverageScenario *TeamIncomeAmount `json:"average_scenario,omitempty"`
+	GoodScenario   *TeamIncomeAmount `json:"good_scenario,omitempty"`
+}
+
+type TeamIncomeForecastResponse struct {
+	ProjectID               uuid.UUID               `json:"project_id"`
+	ProjectCurrencyCode     string                  `json:"project_currency_code"`
+	ForecastAvailable       bool                    `json:"forecast_available"`
+	LatestForecastRunID     *uuid.UUID              `json:"latest_forecast_run_id,omitempty"`
+	LatestForecastCreatedAt *time.Time              `json:"latest_forecast_created_at,omitempty"`
+	ScenarioModel           TeamIncomeScenarioModel `json:"scenario_model"`
+	Members                 []TeamIncomeForecastMember `json:"members"`
+}
+
 type MyIncomeResponse struct {
 	ProjectID           uuid.UUID                   `json:"project_id"`
 	ProjectCurrencyCode string                      `json:"project_currency_code"`
@@ -177,9 +223,11 @@ func (s *Service) CreateRule(ctx context.Context, req sqlc.CreateProfitShareRule
 		return sqlc.ProfitShareRule{}, err
 	}
 	req.CurrencyCode = normalizedCurrency
-	if err := s.validateRecipientUser(ctx, req.ProjectID, req.RecipientUserID); err != nil {
+	recipientMember, err := s.resolveRecipientMember(ctx, req.ProjectID, req.RecipientUserID)
+	if err != nil {
 		return sqlc.ProfitShareRule{}, err
 	}
+	req.RecipientName = formatMemberDisplayName(recipientMember)
 	req.AppliesAfterMandatory = req.Level > 1
 	if err := s.validateLevelSequence(ctx, req.ProjectID, req.Level, nil); err != nil {
 		return sqlc.ProfitShareRule{}, err
@@ -221,9 +269,11 @@ func (s *Service) CreateRulePrepend(ctx context.Context, req sqlc.CreateProfitSh
 		return sqlc.ProfitShareRule{}, err
 	}
 	req.CurrencyCode = normalizedCurrency
-	if err := s.validateRecipientUser(ctx, req.ProjectID, req.RecipientUserID); err != nil {
+	recipientMember, err := s.resolveRecipientMember(ctx, req.ProjectID, req.RecipientUserID)
+	if err != nil {
 		return sqlc.ProfitShareRule{}, err
 	}
+	req.RecipientName = formatMemberDisplayName(recipientMember)
 	created, err := s.repo.CreateProfitShareRulePrepend(ctx, req)
 	if err != nil {
 		return sqlc.ProfitShareRule{}, err
@@ -257,9 +307,11 @@ func (s *Service) UpdateRule(ctx context.Context, req sqlc.UpdateProfitShareRule
 		return sqlc.ProfitShareRule{}, err
 	}
 	req.CurrencyCode = normalizedCurrency
-	if err := s.validateRecipientUser(ctx, req.ProjectID, req.RecipientUserID); err != nil {
+	recipientMember, err := s.resolveRecipientMember(ctx, req.ProjectID, req.RecipientUserID)
+	if err != nil {
 		return sqlc.ProfitShareRule{}, err
 	}
+	req.RecipientName = formatMemberDisplayName(recipientMember)
 	req.AppliesAfterMandatory = req.Level > 1
 	if err := s.validateLevelSequence(ctx, req.ProjectID, req.Level, &req.ID); err != nil {
 		return sqlc.ProfitShareRule{}, err
@@ -311,7 +363,19 @@ func (s *Service) Preview(ctx context.Context, projectID uuid.UUID) (PreviewResp
 	if err != nil {
 		return PreviewResponse{}, err
 	}
-	return s.buildPreviewResponse(ctx, project, totals, taxRules, rules)
+	return s.buildPreviewResponse(ctx, project, totals, taxRules, rules, nil)
+}
+
+func (s *Service) PreviewForUser(ctx context.Context, projectID, viewerUserID uuid.UUID) (PreviewResponse, error) {
+	project, totals, taxRules, rules, err := s.loadPreviewInputs(ctx, projectID)
+	if err != nil {
+		return PreviewResponse{}, err
+	}
+	viewer, err := s.repo.GetUserByID(ctx, viewerUserID)
+	if err != nil {
+		return PreviewResponse{}, err
+	}
+	return s.buildPreviewResponse(ctx, project, totals, taxRules, rules, &viewer)
 }
 
 func (s *Service) loadPreviewInputs(ctx context.Context, projectID uuid.UUID) (sqlc.Project, sqlc.FinanceSummary, []sqlc.ProjectTaxRule, []sqlc.ProfitShareRule, error) {
@@ -340,6 +404,7 @@ func (s *Service) buildPreviewResponse(
 	totals sqlc.FinanceSummary,
 	taxRules []sqlc.ProjectTaxRule,
 	rules []sqlc.ProfitShareRule,
+	viewer *sqlc.User,
 ) (PreviewResponse, error) {
 	summary := ComputeSummary(totals, taxRules)
 	taxLevels := buildTaxLevelItems(summary.AvailableBeforeTax, taxRules)
@@ -419,6 +484,28 @@ func (s *Service) buildPreviewResponse(
 	}
 
 	distributedAmount, distributedPercent, remainingAmount, remainingPercent = calculateDistributionStats(summary.AvailableForSharing, items)
+	viewerCurrencyCode := ""
+	if viewer != nil {
+		resolvedViewerCurrency, currencyErr := normalizePayoutCurrencyCode(viewer.DefaultCurrencyCode, project.CurrencyCode)
+		if currencyErr != nil {
+			viewerCurrencyCode = project.CurrencyCode
+		} else {
+			viewerCurrencyCode = resolvedViewerCurrency
+		}
+		for idx := range items {
+			items[idx].ViewerCurrencyCode = viewerCurrencyCode
+			convertedAmount, rate, convertErr := s.convertAmount(ctx, items[idx].PayoutAmount, project.CurrencyCode, viewerCurrencyCode)
+			if convertErr != nil {
+				if errors.Is(convertErr, ErrCurrencyRateUnavailable) {
+					continue
+				}
+				return PreviewResponse{}, convertErr
+			}
+			items[idx].ViewerAmountConverted = ptrFloat64(convertedAmount)
+			items[idx].ViewerConversionRate = ptrFloat64(rate)
+		}
+	}
+
 	remainingCurrency := project.CurrencyCode
 	if project.SecondaryCurrencyCode != nil && strings.TrimSpace(*project.SecondaryCurrencyCode) != "" {
 		remainingCurrency = strings.ToUpper(strings.TrimSpace(*project.SecondaryCurrencyCode))
@@ -437,6 +524,7 @@ func (s *Service) buildPreviewResponse(
 		Summary:                  summary,
 		ProjectCurrencyCode:      project.CurrencyCode,
 		SecondaryCurrencyCode:    secondaryCurrencyCode,
+		ViewerCurrencyCode:       viewerCurrencyCode,
 		TaxLevels:                taxLevels,
 		DistributedAmount:        distributedAmount,
 		DistributedPercent:       distributedPercent,
@@ -544,7 +632,7 @@ func (s *Service) MyIncome(ctx context.Context, projectID, userID uuid.UUID) (My
 		return MyIncomeResponse{}, err
 	}
 
-	preview, err := s.buildPreviewResponse(ctx, project, totals, taxRules, rules)
+	preview, err := s.buildPreviewResponse(ctx, project, totals, taxRules, rules, nil)
 	if err != nil {
 		return MyIncomeResponse{}, err
 	}
@@ -577,6 +665,126 @@ func (s *Service) MyIncome(ctx context.Context, projectID, userID uuid.UUID) (My
 		ForecastProjection:  forecastProjection,
 		Items:               computation.Items,
 	}, nil
+}
+
+func (s *Service) TeamIncomeForecast(ctx context.Context, projectID uuid.UUID) (TeamIncomeForecastResponse, error) {
+	project, totals, taxRules, rules, err := s.loadPreviewInputs(ctx, projectID)
+	if err != nil {
+		return TeamIncomeForecastResponse{}, err
+	}
+	members, err := s.repo.ListProjectMembers(ctx, projectID)
+	if err != nil {
+		return TeamIncomeForecastResponse{}, err
+	}
+
+	currentPreview, err := s.buildPreviewResponse(ctx, project, totals, taxRules, rules, nil)
+	if err != nil {
+		return TeamIncomeForecastResponse{}, err
+	}
+
+	response := TeamIncomeForecastResponse{
+		ProjectID:           projectID,
+		ProjectCurrencyCode: project.CurrencyCode,
+		ScenarioModel: TeamIncomeScenarioModel{
+			Poor: TeamIncomeScenarioDefinition{
+				Key:         "poor",
+				Label:       "Poor",
+				ForecastKey: "p10",
+				Description: "Uses the latest forecast run p10 cumulative income scenario.",
+			},
+			Average: TeamIncomeScenarioDefinition{
+				Key:         "average",
+				Label:       "Average",
+				ForecastKey: "yhat",
+				Description: "Uses the latest forecast run expected cumulative income scenario (yhat).",
+			},
+			Good: TeamIncomeScenarioDefinition{
+				Key:         "good",
+				Label:       "Good",
+				ForecastKey: "p90",
+				Description: "Uses the latest forecast run p90 cumulative income scenario.",
+			},
+		},
+		Members: make([]TeamIncomeForecastMember, 0, len(members)),
+	}
+
+	var poorPreview *PreviewResponse
+	var averagePreview *PreviewResponse
+	var goodPreview *PreviewResponse
+
+	run, err := s.repo.GetLatestForecastRunByProject(ctx, projectID)
+	if err == nil {
+		points, err := s.repo.ListForecastPointsByRun(ctx, run.ID)
+		if err != nil {
+			return TeamIncomeForecastResponse{}, err
+		}
+		sums := sumForecastScenarios(points)
+		response.ForecastAvailable = true
+		response.LatestForecastRunID = &run.ID
+		response.LatestForecastCreatedAt = &run.CreatedAt
+
+		poor, err := s.buildProjectedPreview(ctx, project, totals, taxRules, rules, round2(totals.IncomeTotal+sums.P10))
+		if err != nil {
+			return TeamIncomeForecastResponse{}, err
+		}
+		average, err := s.buildProjectedPreview(ctx, project, totals, taxRules, rules, round2(totals.IncomeTotal+sums.Yhat))
+		if err != nil {
+			return TeamIncomeForecastResponse{}, err
+		}
+		good, err := s.buildProjectedPreview(ctx, project, totals, taxRules, rules, round2(totals.IncomeTotal+sums.P90))
+		if err != nil {
+			return TeamIncomeForecastResponse{}, err
+		}
+		poorPreview = &poor
+		averagePreview = &average
+		goodPreview = &good
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return TeamIncomeForecastResponse{}, err
+	}
+
+	for _, member := range members {
+		user := userFromProjectMember(member)
+		current, err := s.computeMyIncomeFromPreview(ctx, user, currentPreview)
+		if err != nil {
+			return TeamIncomeForecastResponse{}, err
+		}
+
+		item := TeamIncomeForecastMember{
+			UserID:        member.UserID,
+			FullName:      formatMemberDisplayName(member),
+			Role:          string(member.Role),
+			CurrentEarned: buildTeamIncomeAmount(current, project.CurrencyCode),
+		}
+
+		if poorPreview != nil {
+			poorIncome, err := s.computeMyIncomeFromPreview(ctx, user, *poorPreview)
+			if err != nil {
+				return TeamIncomeForecastResponse{}, err
+			}
+			amount := buildTeamIncomeAmount(poorIncome, project.CurrencyCode)
+			item.PoorScenario = &amount
+		}
+		if averagePreview != nil {
+			averageIncome, err := s.computeMyIncomeFromPreview(ctx, user, *averagePreview)
+			if err != nil {
+				return TeamIncomeForecastResponse{}, err
+			}
+			amount := buildTeamIncomeAmount(averageIncome, project.CurrencyCode)
+			item.AverageScenario = &amount
+		}
+		if goodPreview != nil {
+			goodIncome, err := s.computeMyIncomeFromPreview(ctx, user, *goodPreview)
+			if err != nil {
+				return TeamIncomeForecastResponse{}, err
+			}
+			amount := buildTeamIncomeAmount(goodIncome, project.CurrencyCode)
+			item.GoodScenario = &amount
+		}
+
+		response.Members = append(response.Members, item)
+	}
+
+	return response, nil
 }
 
 func (s *Service) computeMyIncomeFromPreview(ctx context.Context, user sqlc.User, preview PreviewResponse) (myIncomeComputation, error) {
@@ -675,6 +883,19 @@ func (s *Service) buildForecastProjection(
 	}, nil
 }
 
+func (s *Service) buildProjectedPreview(
+	ctx context.Context,
+	project sqlc.Project,
+	totals sqlc.FinanceSummary,
+	taxRules []sqlc.ProjectTaxRule,
+	rules []sqlc.ProfitShareRule,
+	projectedIncomeTotal float64,
+) (PreviewResponse, error) {
+	projectedTotals := totals
+	projectedTotals.IncomeTotal = projectedIncomeTotal
+	return s.buildPreviewResponse(ctx, project, projectedTotals, taxRules, rules, nil)
+}
+
 func (s *Service) buildForecastScenario(
 	ctx context.Context,
 	project sqlc.Project,
@@ -687,7 +908,7 @@ func (s *Service) buildForecastScenario(
 	projectedTotals := totals
 	projectedTotals.IncomeTotal = round2(projectedIncomeTotal)
 
-	preview, err := s.buildPreviewResponse(ctx, project, projectedTotals, taxRules, rules)
+	preview, err := s.buildPreviewResponse(ctx, project, projectedTotals, taxRules, rules, nil)
 	if err != nil {
 		return MyIncomeForecastScenario{}, err
 	}
@@ -717,6 +938,16 @@ func sumForecastScenarios(points []sqlc.ForecastPoint) forecastScenarioSums {
 		out.P90 = round2(out.P90 + point.P90)
 	}
 	return out
+}
+
+func buildTeamIncomeAmount(computation myIncomeComputation, projectCurrencyCode string) TeamIncomeAmount {
+	return TeamIncomeAmount{
+		ProjectAmount:        computation.TotalProjectAmount,
+		ProjectCurrencyCode:  projectCurrencyCode,
+		UserAmount:           computation.TotalUserAmount,
+		UserCurrencyCode:     computation.UserCurrencyCode,
+		ConversionRateToUser: computation.TotalConversionRate,
+	}
 }
 
 func (s *Service) CalculateAndPersist(ctx context.Context, projectID uuid.UUID) ([]sqlc.Payout, PreviewResponse, SnapshotFile, error) {
@@ -934,7 +1165,7 @@ func profitRuleLevel(rule sqlc.ProfitShareRule) int32 {
 
 func (s *Service) validateRecipientUser(ctx context.Context, projectID uuid.UUID, recipientUserID *uuid.UUID) error {
 	if recipientUserID == nil {
-		return nil
+		return ErrRecipientUserRequired
 	}
 	_, err := s.repo.GetProjectMemberByUser(ctx, sqlc.GetProjectMemberByUserParams{
 		ProjectID: projectID,
@@ -947,6 +1178,56 @@ func (s *Service) validateRecipientUser(ctx context.Context, projectID uuid.UUID
 		return err
 	}
 	return nil
+}
+
+func (s *Service) resolveRecipientMember(ctx context.Context, projectID uuid.UUID, recipientUserID *uuid.UUID) (sqlc.ProjectMemberWithUser, error) {
+	if recipientUserID == nil {
+		return sqlc.ProjectMemberWithUser{}, ErrRecipientUserRequired
+	}
+	members, err := s.repo.ListProjectMembers(ctx, projectID)
+	if err != nil {
+		return sqlc.ProjectMemberWithUser{}, err
+	}
+	for _, member := range members {
+		if member.UserID == *recipientUserID {
+			return member, nil
+		}
+	}
+	return sqlc.ProjectMemberWithUser{}, ErrInvalidRecipientUser
+}
+
+func formatMemberDisplayName(member sqlc.ProjectMemberWithUser) string {
+	name := strings.TrimSpace(strings.TrimSpace(member.FirstName) + " " + strings.TrimSpace(member.LastName))
+	if name != "" {
+		return name
+	}
+	if fullName := strings.TrimSpace(member.FullName); fullName != "" {
+		return fullName
+	}
+	if nickname := strings.TrimSpace(member.Nickname); nickname != "" {
+		return nickname
+	}
+	if email := strings.TrimSpace(member.Email); email != "" {
+		return email
+	}
+	return "Unknown member"
+}
+
+func userFromProjectMember(member sqlc.ProjectMemberWithUser) sqlc.User {
+	return sqlc.User{
+		ID:                  member.UserID,
+		Email:               member.Email,
+		FullName:            member.FullName,
+		FirstName:           member.FirstName,
+		LastName:            member.LastName,
+		Nickname:            member.Nickname,
+		AvatarPath:          member.AvatarPath,
+		DefaultCurrencyCode: member.DefaultCurrencyCode,
+	}
+}
+
+func ptrFloat64(v float64) *float64 {
+	return &v
 }
 
 func (s *Service) validateLevelSequence(ctx context.Context, projectID uuid.UUID, level int32, excludeID *uuid.UUID) error {

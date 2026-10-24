@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="340" viewBox="0 0 1280 340" role="img" aria-labelledby="title desc">
+<title id="title">IS Budget. Backend and product development.</title>
+<desc id="desc">C sharp, dot net, Go, APIs and applied automation. A dark editorial banner with a mint accent.</desc>
+<defs><pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#30413d"/></pattern></defs>
+<rect width="1280" height="340" rx="18" fill="#111d1b"/>
+<rect x="886" width="394" height="340" rx="18" fill="url(#grid)"/>
+<path d="M50 47h38" stroke="#b8f3b0" stroke-width="5"/>
+<text x="50" y="92" fill="#b8f3b0" font-family="Consolas,monospace" font-size="15" letter-spacing="3">GO / PROJECT FINANCE</text>
+<text x="46" y="164" fill="#f4f4e9" font-family="Georgia,serif" font-size="66" letter-spacing="-2">IS Budget</text>
+<text x="50" y="207" fill="#b9c7c0" font-family="Segoe UI,sans-serif" font-size="21">Project income, costs and team finance in one app.</text>
+<path d="M50 245h736" stroke="#354741"/>
+<text x="50" y="287" fill="#f4f4e9" font-family="Consolas,monospace" font-size="18">Go + API</text>
+<text x="220" y="287" fill="#f4f4e9" font-family="Consolas,monospace" font-size="18">React</text>
+<text x="298" y="287" fill="#f4f4e9" font-family="Consolas,monospace" font-size="18">PostgreSQL</text>
+<text x="480" y="287" fill="#f4f4e9" font-family="Consolas,monospace" font-size="18">Next.js</text>
+<rect x="956" y="67" width="220" height="61" rx="9" fill="#1c2d28" stroke="#53665b"/>
+<text x="984" y="105" fill="#e6eee5" font-family="Consolas,monospace" font-size="18">request</text>
+<path d="M1066 129v30" stroke="#b8f3b0" stroke-width="2"/>
+<rect x="916" y="159" width="220" height="61" rx="9" fill="#b8f3b0"/>
+<text x="944" y="197" fill="#13251b" font-family="Consolas,monospace" font-size="18">application</text>
+<path d="M1026 221v28h87" fill="none" stroke="#b8f3b0" stroke-width="2"/>
+<circle cx="1122" cy="249" r="8" fill="#b8f3b0"/>
+<text x="944" y="291" fill="#9caf9e" font-family="Consolas,monospace" font-size="14">use / observe / improve</text>
+</svg>

@@ -4,7 +4,7 @@
 
 **Приложение для управления финансами проектной команды: доходы, расходы, распределение средств и прогнозирование.**
 
-![CI](https://github.com/RassolovSergey/IS-Budget-public/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/RassolovSergey/is-budget/actions/workflows/ci.yml/badge.svg)
 
 Проект объединяет финансовую модель, роли участников и планирование работы. Подходит для демонстрации backend-разработки, интеграции сервисов и работы с предметной областью.
 
@@ -69,7 +69,7 @@ python -m pip install -r requirements.txt
 python -m unittest discover -s tests -t . -p 'test_*.py'
 ```
 
-CI проверяет backend, frontend и analytics отдельно. [Состояние проверок](https://github.com/RassolovSergey/IS-Budget-public/actions).
+CI проверяет backend, frontend и analytics отдельно. [Состояние проверок](https://github.com/RassolovSergey/is-budget/actions).
 
 ## Статус и ограничения
 

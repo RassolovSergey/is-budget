@@ -36,6 +36,6 @@ type ImportRecordResponse struct {
 }
 
 type ImportRunDetail struct {
-	Run     ImportRunSummary      `json:"run"`
+	Run     ImportRunSummary       `json:"run"`
 	Records []ImportRecordResponse `json:"records"`
 }

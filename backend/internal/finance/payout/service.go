@@ -155,22 +155,22 @@ type TeamIncomeScenarioModel struct {
 }
 
 type TeamIncomeForecastMember struct {
-	UserID         uuid.UUID         `json:"user_id"`
-	FullName       string            `json:"full_name"`
-	Role           string            `json:"role"`
-	CurrentEarned  TeamIncomeAmount  `json:"current_earned"`
-	PoorScenario   *TeamIncomeAmount `json:"poor_scenario,omitempty"`
+	UserID          uuid.UUID         `json:"user_id"`
+	FullName        string            `json:"full_name"`
+	Role            string            `json:"role"`
+	CurrentEarned   TeamIncomeAmount  `json:"current_earned"`
+	PoorScenario    *TeamIncomeAmount `json:"poor_scenario,omitempty"`
 	AverageScenario *TeamIncomeAmount `json:"average_scenario,omitempty"`
-	GoodScenario   *TeamIncomeAmount `json:"good_scenario,omitempty"`
+	GoodScenario    *TeamIncomeAmount `json:"good_scenario,omitempty"`
 }
 
 type TeamIncomeForecastResponse struct {
-	ProjectID               uuid.UUID               `json:"project_id"`
-	ProjectCurrencyCode     string                  `json:"project_currency_code"`
-	ForecastAvailable       bool                    `json:"forecast_available"`
-	LatestForecastRunID     *uuid.UUID              `json:"latest_forecast_run_id,omitempty"`
-	LatestForecastCreatedAt *time.Time              `json:"latest_forecast_created_at,omitempty"`
-	ScenarioModel           TeamIncomeScenarioModel `json:"scenario_model"`
+	ProjectID               uuid.UUID                  `json:"project_id"`
+	ProjectCurrencyCode     string                     `json:"project_currency_code"`
+	ForecastAvailable       bool                       `json:"forecast_available"`
+	LatestForecastRunID     *uuid.UUID                 `json:"latest_forecast_run_id,omitempty"`
+	LatestForecastCreatedAt *time.Time                 `json:"latest_forecast_created_at,omitempty"`
+	ScenarioModel           TeamIncomeScenarioModel    `json:"scenario_model"`
 	Members                 []TeamIncomeForecastMember `json:"members"`
 }
 

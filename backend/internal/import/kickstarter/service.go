@@ -22,9 +22,9 @@ const (
 )
 
 var (
-	ErrImportReadDenied            = errors.New("import history requires project membership")
-	ErrImportWriteDenied           = errors.New("kickstarter import requires project manager permissions")
-	ErrImportRunNotFound           = errors.New("import run not found")
+	ErrImportReadDenied             = errors.New("import history requires project membership")
+	ErrImportWriteDenied            = errors.New("kickstarter import requires project manager permissions")
+	ErrImportRunNotFound            = errors.New("import run not found")
 	ErrImportConflictExistingIncome = errors.New("existing income records would be overwritten; retry with replace_existing")
 )
 
@@ -59,14 +59,14 @@ func (s *Service) ImportCSV(ctx context.Context, actorID, projectID uuid.UUID, f
 	result, parseErr := parseKickstarterCSV(content)
 	for _, row := range result.Rows {
 		_, _ = s.repo.CreateImportRecord(ctx, sqlc.CreateImportRecordParams{
-			RunID:             run.ID,
-			RowNumber:         row.RowNumber,
-			Status:            row.Status,
-			ErrorMessage:      row.ErrorMessage,
-			PledgedAt:         row.PledgedAt,
-			PledgedAmount:     row.PledgedAmount,
-			BackerIdentifier:  row.BackerIdentifier,
-			RewardTier:        row.RewardTier,
+			RunID:            run.ID,
+			RowNumber:        row.RowNumber,
+			Status:           row.Status,
+			ErrorMessage:     row.ErrorMessage,
+			PledgedAt:        row.PledgedAt,
+			PledgedAmount:    row.PledgedAmount,
+			BackerIdentifier: row.BackerIdentifier,
+			RewardTier:       row.RewardTier,
 		})
 	}
 	if parseErr != nil {
@@ -290,5 +290,5 @@ func formatUserDisplayName(user sqlc.GetUserByIDRow) string {
 	return strings.TrimSpace(user.Email)
 }
 
-func ptrString(value string) *string { return &value }
+func ptrString(value string) *string     { return &value }
 func ptrTime(value time.Time) *time.Time { return &value }
